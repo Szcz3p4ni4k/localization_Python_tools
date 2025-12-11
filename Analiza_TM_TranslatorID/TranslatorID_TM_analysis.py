@@ -2,26 +2,25 @@ import os
 import csv
 import xml.etree.ElementTree as ET
 
+# --- FUNKCJE POMOCNICZE (HELPER FUNCTIONS) ---
+
 def get_clean_text_length(segment_element):
     """
-    Calculates the length of text within a segment, ignoring tags.
-    Oblicza długość tekstu wewnątrz segmentu, ignorując tagi (np. <bpt>, <ept>).
+    Oblicza długość tekstu wewnątrz segmentu, ignorując tagi.
     """
     if segment_element is None:
         return 0
-    # itertext() wyciąga tekst ze wszystkich pod-elementów, pomijając same znaczniki
     text_content = "".join(segment_element.itertext())
     return len(text_content)
 
 def analyze_tmx_file(file_path):
     """
-    Analyzes a single TMX file and returns statistics per translator.
-    Analizuje pojedynczy plik TMX i zwraca statystyki dla każdego tłumacza.
+    Analizuje pojedynczy plik TMX i zwraca listę wierszy do raportu.
     """
-    translators_stats = {} # Słownik: ID Tłumacza -> Statystyki
+    translators_stats = {} 
 
     try:
-        # Próba otwarcia pliku (najpierw domyślnie, potem UTF-16 w razie błędu)
+        # Próba otwarcia pliku (najpierw domyślnie, potem UTF-16)
         try:
             tree = ET.parse(file_path)
         except:
@@ -30,43 +29,34 @@ def analyze_tmx_file(file_path):
             
         root = tree.getroot()
 
-        # 1. Determine Target Language
-        # 1. Ustalenie języka docelowego
+        # 1. Ustalenie języka docelowego (Target Language)
         target_lang = None
-        
-        # [cite_start]Szukanie w <prop type="targetlang"> [cite: 7]
         for prop in root.iter('prop'):
             if prop.get('type') == 'targetlang':
                 target_lang = prop.text
                 break
         
-        # Iteration through translation units <tu>
-        # Iteracja przez jednostki tłumaczeniowe
+        # Iteracja przez jednostki tłumaczeniowe (TU)
         for tu in root.iter('tu'):
             creation_date = tu.get('creationdate')
             creation_id = tu.get('creationid')
             change_date = tu.get('changedate')
             change_id = tu.get('changeid')
 
-            # Find target segment text
             # Znalezienie tekstu segmentu docelowego
             target_text_len = 0
             
             for tuv in tu.findall('tuv'):
-                # Pobranie atrybutu xml:lang (z uwzględnieniem namespace)
                 xml_lang = tuv.get('{http://www.w3.org/XML/1998/namespace}lang')
                 if not xml_lang:
-                    xml_lang = tuv.get('lang') # Fallback
+                    xml_lang = tuv.get('lang')
 
-                # Sprawdzenie czy to język docelowy
                 if target_lang and xml_lang and target_lang.lower() in xml_lang.lower():
                     seg = tuv.find('seg')
-                    # [cite_start]Liczymy znaki czystego tekstu (bez tagów formatowania) [cite: 7]
                     target_text_len = get_clean_text_length(seg)
                     break 
 
-            # Helper function to initialize translator data
-            # Funkcja pomocnicza do inicjalizacji danych tłumacza
+            # Inicjalizacja danych tłumacza
             def init_translator(user_id):
                 if user_id not in translators_stats:
                     translators_stats[user_id] = {
@@ -79,21 +69,18 @@ def analyze_tmx_file(file_path):
                         'changed_chars_count': 0
                     }
 
-            # --- LOGIC: CREATION ---
-            # [cite_start]Zawsze pobieramy dane o tworzeniu [cite: 3]
+            # --- LOGIKA: TWORZENIE (CREATION) ---
             if creation_id:
                 init_translator(creation_id)
                 translators_stats[creation_id]['created_segs_count'] += 1
                 translators_stats[creation_id]['created_chars_count'] += target_text_len
                 
-                # Update last creation date
                 current_c_date = translators_stats[creation_id]['last_creation_date']
                 if creation_date:
                     if current_c_date == "-" or creation_date > current_c_date:
                         translators_stats[creation_id]['last_creation_date'] = creation_date
 
-            # --- LOGIC: CHANGE ---
-            # [cite_start]Sprawdzamy warunek wykluczenia: changedate = creationdate AND creationid = changeid [cite: 5, 6, 8]
+            # --- LOGIKA: ZMIANA (CHANGE) ---
             is_creation_only = (creation_date == change_date) and (creation_id == change_id)
 
             if change_id and not is_creation_only:
@@ -101,83 +88,107 @@ def analyze_tmx_file(file_path):
                 translators_stats[change_id]['changed_segs_count'] += 1
                 translators_stats[change_id]['changed_chars_count'] += target_text_len
 
-                # Update last change date
                 current_m_date = translators_stats[change_id]['last_change_date']
                 if change_date:
                     if current_m_date == "-" or change_date > current_m_date:
                         translators_stats[change_id]['last_change_date'] = change_date
 
+        return translators_stats
+
     except Exception as e:
-        print(f"Błąd podczas przetwarzania pliku {file_path}: {e}")
-        return None
+        # Zwracamy błąd jako string, żeby móc go wypisać w konsoli
+        return f"ERROR: {str(e)}"
 
-    return translators_stats
 
-def main():
-    # Setup paths
-    # Ustawienie ścieżek
-    current_dir = os.getcwd()
-    report_dir = os.path.join(current_dir, "Raport")
+# --- GŁÓWNA CZĘŚĆ SKRYPTU (MAIN SCRIPT) ---
 
-    if not os.path.exists(report_dir):
-        os.makedirs(report_dir)
+# Pobiera ścieżkę do folderu, w którym jest ten skrypt
+input_path = os.path.dirname(os.path.abspath(__file__))
 
-    output_csv_path = os.path.join(report_dir, "analiza_tm.csv")
+print("========================================")
+print(f"Folder roboczy: {input_path}")
+print("========================================")
 
-    print("Rozpoczynam analizę plików TMX...")
+# Krok 1: Szukanie plików
+try:
+    all_files = os.listdir(input_path)
+    # Szukamy tylko plików .tmx
+    tmx_files = [f for f in all_files if f.lower().endswith('.tmx')]
+    total_files = len(tmx_files)
+    print(f"Znaleziono pliki .tmx: {total_files}")
+except Exception as e:
+    print(f"Błąd krytyczny przy czytaniu folderu: {e}")
+    tmx_files = []
+
+# Krok 2: Przetwarzanie
+if tmx_files:
+    output_dir = os.path.join(input_path, "Raport")
+    os.makedirs(output_dir, exist_ok=True)
+    csv_path = os.path.join(output_dir, "analiza_tm_wyniki.csv")
     
-    all_rows = []
-
-    # Iterate over files in directory
-    # Iteracja po plikach w katalogu
-    for filename in os.listdir(current_dir):
-        if filename.lower().endswith('.tmx'):
-            full_path = os.path.join(current_dir, filename)
-            print(f"Analizuję: {filename}")
-            
-            file_results = analyze_tmx_file(full_path)
-            
-            if file_results:
-                # Convert dictionary to list of rows for CSV
-                # Konwersja słownika na listę wierszy do CSV
-                for user_id, stats in file_results.items():
-                    row = {
-                        'Filename': filename,
-                        'Translator ID': user_id,
-                        'Last Segment Date': stats['last_creation_date'],
-                        'Last Change Date': stats['last_change_date'],
-                        'Created Segments': stats['created_segs_count'],
-                        'Changed Segments': stats['changed_segs_count'],
-                        'Created Chars': stats['created_chars_count'],
-                        'Changed Chars': stats['changed_chars_count']
-                    }
-                    all_rows.append(row)
-
-    # Define CSV Columns
-    # Definicja kolumn CSV
-    csv_headers = [
-        'Filename', 'Translator ID', 'Last Segment Date', 
-        'Last Change Date', 'Created Segments', 
-        'Changed Segments', 'Created Chars', 
-        'Changed Chars'
-    ]
-
-    # Write to CSV
-    # Zapis do CSV
+    print(f"Tworzę plik csv: {csv_path}")
+    
     try:
-        # 'utf-8-sig' pozwala Excelowi poprawnie otworzyć plik z polskimi znakami
-        with open(output_csv_path, mode='w', newline='', encoding='utf-8-sig') as csvfile:
-            # Używamy standardowego separatora ',' (przecinek)
-            writer = csv.DictWriter(csvfile, fieldnames=csv_headers, delimiter=',')
+        # Używamy utf-8-sig dla poprawnej obsługi polskich znaków w Excelu
+        with open(csv_path, mode='w', newline='', encoding='utf-8-sig') as f_out:
+            # Ustawiamy delimiter na średnik ';' tak jak w Twoim przykładzie
+            writer = csv.writer(f_out, delimiter=';')
             
-            writer.writeheader()
-            for row in all_rows:
-                writer.writerow(row)
-        
-        print(f"\nSukces! Raport został zapisany w: {output_csv_path}")
+            # NAGŁÓWKI KOLUMN
+            headers = [
+                'Nazwa pliku', 'ID Tlumacza', 'Data ost. segmentu', 
+                'Data ost. zmiany', 'Ilosc stworzonych segmentow', 
+                'Ilosc zmienionych segmentow', 'Ilosc stworzonych znakow', 
+                'Ilosc zmienionych znakow', 'Status'
+            ]
+            writer.writerow(headers)
+            
+            count = 0
+            
+            for filename in tmx_files:
+                count += 1
+                full_path = os.path.join(input_path, filename)
+                
+                # Wywołanie funkcji analizującej
+                result = analyze_tmx_file(full_path)
+                
+                status_msg = "OK"
 
-    except IOError as e:
-        print(f"Błąd zapisu pliku CSV: {e}")
+                # Jeśli result jest stringiem, to znaczy, że wystąpił błąd w funkcji
+                if isinstance(result, str) and result.startswith("ERROR"):
+                    status_msg = result
+                    # Zapisujemy wiersz z błędem
+                    writer.writerow([filename, "-", "-", "-", "-", "-", "-", "-", status_msg])
+                
+                elif result:
+                    # Jeśli mamy wyniki (słownik), zapisujemy wiersze dla każdego tłumacza
+                    for user_id, stats in result.items():
+                        writer.writerow([
+                            filename,
+                            stats['creation_id'],
+                            stats['last_creation_date'],
+                            stats['last_change_date'],
+                            stats['created_segs_count'],
+                            stats['changed_segs_count'],
+                            stats['created_chars_count'],
+                            stats['changed_chars_count'],
+                            status_msg
+                        ])
+                else:
+                    # Plik pusty lub brak danych
+                    writer.writerow([filename, "BRAK DANYCH", "-", "-", "-", "-", "-", "-", "Pusty plik/Brak TU"])
 
-if __name__ == "__main__":
-    main()
+                # Wyświetlamy postęp
+                print(f"[{count}/{total_files}] Analiza: {filename}")
+
+            print("========================================")
+            print(f"SUKCES! Przetworzono {count} plików.")
+            
+    except Exception as e:
+        print(f"BŁĄD zapisu pliku CSV (zamknij Excela!): {e}")
+
+else:
+    print("Nie mam czego przetwarzać. Brak plików .tmx w folderze.")
+
+print("========================================")
+input("Naciśnij ENTER, aby zakończyć")
