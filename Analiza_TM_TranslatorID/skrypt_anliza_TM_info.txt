@@ -44,3 +44,6 @@ skrypt analizujący pamięci tłumaczeniowe:
 - skrypt będzie wrzucany do folderu z TMami i odpalany w tym folderze
 - zapisz gotowy raport CSV w folderze "Raport" na ścieżce gdzie skrypt będzie odpalony
 
+<tuv xml:lang="en">
+      <seg><it pos='begin'>&lt;rpr id=&quot;3&quot;&gt;</it><bpt i='1' type='bold'>x</bpt>x<ept i='1'>x</ept></seg>
+    </tuv>
