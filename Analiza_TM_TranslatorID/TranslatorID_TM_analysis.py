@@ -1,200 +1,180 @@
 import os
 import csv
 import xml.etree.ElementTree as ET
-import re
 
-# Funkcja czyszcząca tekst z tagów XML/HTML (np. <bpt>, <ept>)
-def usun_tagi(tekst):
-    if not tekst:
-        return ""
-    # Wyrażenie regularne: znajdź wszystko co zaczyna się od < i kończy na >
-    czysty_tekst = re.sub(r'<[^>]+>', '', tekst)
-    return czysty_tekst
+def get_clean_text_length(segment_element):
+    """
+    Calculates the length of text within a segment, ignoring tags.
+    Oblicza długość tekstu wewnątrz segmentu, ignorując tagi (np. <bpt>, <ept>).
+    """
+    if segment_element is None:
+        return 0
+    # itertext() wyciąga tekst ze wszystkich pod-elementów, pomijając same znaczniki
+    text_content = "".join(segment_element.itertext())
+    return len(text_content)
 
-def analizuj_plik_tmx(sciezka_pliku):
-    # Słownik do przechowywania danych tłumaczy dla tego konkretnego pliku
-    # Kluczem będzie ID tłumacza, wartością słownik ze statystykami
-    dane_tlumaczy = {}
+def analyze_tmx_file(file_path):
+    """
+    Analyzes a single TMX file and returns statistics per translator.
+    Analizuje pojedynczy plik TMX i zwraca statystyki dla każdego tłumacza.
+    """
+    translators_stats = {} # Słownik: ID Tłumacza -> Statystyki
 
     try:
-        # Parsowanie pliku XML. TMX często są w UTF-16, ale na wypadek UTF-8 używamy trybów
+        # Próba otwarcia pliku (najpierw domyślnie, potem UTF-16 w razie błędu)
         try:
-            tree = ET.parse(sciezka_pliku)
+            tree = ET.parse(file_path)
         except:
-            # Jeśli domyślne parsowanie zawiedzie, próbujemy wymusić parser XML
             parser = ET.XMLParser(encoding="utf-16")
-            tree = ET.parse(sciezka_pliku, parser=parser)
+            tree = ET.parse(file_path, parser=parser)
             
         root = tree.getroot()
 
-        # 1. Ustalenie języka docelowego (Target Language) dla całego pliku
-        # Szukamy w headerze lub w pierwszym prop type="targetlang"
-        jezyk_target = None
+        # 1. Determine Target Language
+        # 1. Ustalenie języka docelowego
+        target_lang = None
         
-        # Próba znalezienia we właściwościach (zgodnie z instrukcją)
+        # [cite_start]Szukanie w <prop type="targetlang"> [cite: 7]
         for prop in root.iter('prop'):
             if prop.get('type') == 'targetlang':
-                jezyk_target = prop.text
+                target_lang = prop.text
                 break
         
-        # Jeśli nie znaleziono w prop, szukamy w nagłówku (standard TMX)
-        if not jezyk_target:
-            header = root.find('header')
-            if header is not None:
-                # Często header ma atrybut 'srclang', więc target musimy wywnioskować
-                # W tym prostym skrypcie założymy, że jeśli nie ma prop, spróbujemy znaleźć
-                # język w segmentach później, ale dla bezpieczeństwa logujemy informację.
-                pass
-
-        # Iteracja przez wszystkie jednostki tłumaczeniowe <tu>
-        # namespace w XML może być kłopotliwy, więc używamy iter() który szuka głęboko
+        # Iteration through translation units <tu>
+        # Iteracja przez jednostki tłumaczeniowe
         for tu in root.iter('tu'):
-            # Pobranie atrybutów creation i change
             creation_date = tu.get('creationdate')
             creation_id = tu.get('creationid')
             change_date = tu.get('changedate')
             change_id = tu.get('changeid')
 
-            # --- KROK 1: Znalezienie tekstu targetu ---
-            tekst_target = ""
-            # Szukamy wszystkich wariantów tłumaczenia <tuv>
+            # Find target segment text
+            # Znalezienie tekstu segmentu docelowego
+            target_text_len = 0
+            
             for tuv in tu.findall('tuv'):
-                # Pobieramy atrybut xml:lang. Uwaga: ElementTree dodaje namespace w klamrach
+                # Pobranie atrybutu xml:lang (z uwzględnieniem namespace)
                 xml_lang = tuv.get('{http://www.w3.org/XML/1998/namespace}lang')
                 if not xml_lang:
-                    # Czasami atrybut jest bez namespace (zależy od parsera/pliku)
-                    xml_lang = tuv.get('lang')
+                    xml_lang = tuv.get('lang') # Fallback
 
-                # Sprawdzamy czy to język docelowy. 
-                # Jeśli mamy ustalony jezyk_target, sprawdzamy zgodność.
-                # Jeśli nie mamy, zakładamy (ryzykownie), że drugi tuv to target, 
-                # ale bezpieczniej jest wymagać prop targetlang.
-                if jezyk_target and xml_lang and jezyk_target.lower() in xml_lang.lower():
+                # Sprawdzenie czy to język docelowy
+                if target_lang and xml_lang and target_lang.lower() in xml_lang.lower():
                     seg = tuv.find('seg')
-                    if seg is not None and seg.text:
-                        # Pobieramy tekst (może zawierać tagi w środku, więc itertext łączy wszystko)
-                        # Ale musimy uważać na tagi <bpt>. Użyjemy metody itertext() lub parsowania stringa.
-                        # Tutaj prostsze podejście: pobierzmy surowy XML segmentu i wyczyśćmy regexem,
-                        # aby zachować spacje ale usunąć tagi.
-                        raw_content = "".join(seg.itertext()) # To pobiera sam tekst, pomijając tagi <..>
-                        tekst_target = raw_content
-                    break # Znaleźliśmy target, przerywamy pętlę tuv
-            
-            # Obliczenie długości czystego tekstu
-            dlugosc_tekstu = len(tekst_target)
+                    # [cite_start]Liczymy znaki czystego tekstu (bez tagów formatowania) [cite: 7]
+                    target_text_len = get_clean_text_length(seg)
+                    break 
 
-            # Funkcja pomocnicza do inicjalizacji danych tłumacza w słowniku
-            def inicjuj_tlumacza(id_tlumacza):
-                if id_tlumacza not in dane_tlumaczy:
-                    dane_tlumaczy[id_tlumacza] = {
-                        'creation_id': id_tlumacza, # ID Tłumacza
-                        'last_creation_date': "-",  # Data ost. segmentu
-                        'last_change_date': "-",    # Data ost. zmiany
-                        'created_segs': 0,          # ilość stworzonych segmentów
-                        'changed_segs': 0,          # ilość zmienionych segmentów
-                        'created_chars': 0,         # ilość stworzonych znaków
-                        'changed_chars': 0          # ilość zmienionych znaków
+            # Helper function to initialize translator data
+            # Funkcja pomocnicza do inicjalizacji danych tłumacza
+            def init_translator(user_id):
+                if user_id not in translators_stats:
+                    translators_stats[user_id] = {
+                        'creation_id': user_id,
+                        'last_creation_date': "-",
+                        'last_change_date': "-",
+                        'created_segs_count': 0,
+                        'changed_segs_count': 0,
+                        'created_chars_count': 0,
+                        'changed_chars_count': 0
                     }
 
-            # --- KROK 2: Logika CREATION (Zawsze liczona) ---
+            # --- LOGIC: CREATION ---
+            # [cite_start]Zawsze pobieramy dane o tworzeniu [cite: 3]
             if creation_id:
-                inicjuj_tlumacza(creation_id)
-                dane_tlumaczy[creation_id]['created_segs'] += 1
-                dane_tlumaczy[creation_id]['created_chars'] += dlugosc_tekstu
+                init_translator(creation_id)
+                translators_stats[creation_id]['created_segs_count'] += 1
+                translators_stats[creation_id]['created_chars_count'] += target_text_len
                 
-                # Aktualizacja daty (bierzemy późniejszą)
-                obecna_data = dane_tlumaczy[creation_id]['last_creation_date']
+                # Update last creation date
+                current_c_date = translators_stats[creation_id]['last_creation_date']
                 if creation_date:
-                    if obecna_data == "-" or creation_date > obecna_data:
-                        dane_tlumaczy[creation_id]['last_creation_date'] = creation_date
+                    if current_c_date == "-" or creation_date > current_c_date:
+                        translators_stats[creation_id]['last_creation_date'] = creation_date
 
-            # --- KROK 3: Logika CHANGE (Warunkowa) ---
-            # Warunek wykluczenia z pliku:
-            # Jeżeli changedate = creationdate i creationid = changeid -> NIE bierzemy pod uwagę
-            jest_to_tylko_stworzenie = (creation_date == change_date) and (creation_id == change_id)
+            # --- LOGIC: CHANGE ---
+            # [cite_start]Sprawdzamy warunek wykluczenia: changedate = creationdate AND creationid = changeid [cite: 5, 6, 8]
+            is_creation_only = (creation_date == change_date) and (creation_id == change_id)
 
-            if change_id and not jest_to_tylko_stworzenie:
-                inicjuj_tlumacza(change_id)
-                dane_tlumaczy[change_id]['changed_segs'] += 1
-                dane_tlumaczy[change_id]['changed_chars'] += dlugosc_tekstu
+            if change_id and not is_creation_only:
+                init_translator(change_id)
+                translators_stats[change_id]['changed_segs_count'] += 1
+                translators_stats[change_id]['changed_chars_count'] += target_text_len
 
-                # Aktualizacja daty zmiany
-                obecna_data_zmiany = dane_tlumaczy[change_id]['last_change_date']
+                # Update last change date
+                current_m_date = translators_stats[change_id]['last_change_date']
                 if change_date:
-                    if obecna_data_zmiany == "-" or change_date > obecna_data_zmiany:
-                        dane_tlumaczy[change_id]['last_change_date'] = change_date
+                    if current_m_date == "-" or change_date > current_m_date:
+                        translators_stats[change_id]['last_change_date'] = change_date
 
     except Exception as e:
-        print(f"Błąd podczas przetwarzania pliku {sciezka_pliku}: {e}")
+        print(f"Błąd podczas przetwarzania pliku {file_path}: {e}")
         return None
 
-    return dane_tlumaczy
+    return translators_stats
 
 def main():
-    # Pobranie ścieżki do folderu, w którym jest skrypt
-    sciezka_skryptu = os.getcwd()
-    folder_raportu = os.path.join(sciezka_skryptu, "Raport")
+    # Setup paths
+    # Ustawienie ścieżek
+    current_dir = os.getcwd()
+    report_dir = os.path.join(current_dir, "Raport")
 
-    # Tworzenie folderu Raport, jeśli nie istnieje
-    if not os.path.exists(folder_raportu):
-        os.makedirs(folder_raportu)
+    if not os.path.exists(report_dir):
+        os.makedirs(report_dir)
 
-    sciezka_wynikowa = os.path.join(folder_raportu, "analiza_tm.csv")
+    output_csv_path = os.path.join(report_dir, "analiza_tm.csv")
 
     print("Rozpoczynam analizę plików TMX...")
     
-    # Lista do zbierania wszystkich wierszy do CSV
-    wszystkie_dane = []
+    all_rows = []
 
-    # Szukanie plików .tmx w folderze
-    for plik in os.listdir(sciezka_skryptu):
-        if plik.lower().endswith('.tmx'):
-            pelna_sciezka = os.path.join(sciezka_skryptu, plik)
-            print(f"Analizuję: {plik}")
+    # Iterate over files in directory
+    # Iteracja po plikach w katalogu
+    for filename in os.listdir(current_dir):
+        if filename.lower().endswith('.tmx'):
+            full_path = os.path.join(current_dir, filename)
+            print(f"Analizuję: {filename}")
             
-            # Analiza pojedynczego pliku
-            wyniki_pliku = analizuj_plik_tmx(pelna_sciezka)
+            file_results = analyze_tmx_file(full_path)
             
-            if wyniki_pliku:
-                # Przekształcenie wyników słownika na listę wierszy do CSV
-                for id_tlumacza, statystyki in wyniki_pliku.items():
-                    wiersz = {
-                        'nazwa_pliku': plik,
-                        'id_tlumacza': id_tlumacza,
-                        'data_ost_seg': statystyki['last_creation_date'],
-                        'data_ost_zmiany': statystyki['last_change_date'],
-                        'ilosc_stworzonych_seg': statystyki['created_segs'],
-                        'ilosc_zmienionych_seg': statystyki['changed_segs'],
-                        'ilosc_stworzonych_znak': statystyki['created_chars'],
-                        'ilosc_zmienionych_znak': statystyki['changed_chars']
+            if file_results:
+                # Convert dictionary to list of rows for CSV
+                # Konwersja słownika na listę wierszy do CSV
+                for user_id, stats in file_results.items():
+                    row = {
+                        'Filename': filename,
+                        'Translator ID': user_id,
+                        'Last Segment Date': stats['last_creation_date'],
+                        'Last Change Date': stats['last_change_date'],
+                        'Created Segments': stats['created_segs_count'],
+                        'Changed Segments': stats['changed_segs_count'],
+                        'Created Chars': stats['created_chars_count'],
+                        'Changed Chars': stats['changed_chars_count']
                     }
-                    wszystkie_dane.append(wiersz)
+                    all_rows.append(row)
 
-    # Zapis do CSV
-    naglowki = [
-        'nazwa TMa', 'ID Tłumacza', 'data ostatniego segmentu', 
-        'data ostatniej zmiany', 'ilość stworzonych segmentów', 
-        'ilość zmienionych segmentów', 'ilość stworzonych znaków', 
-        'ilość zmienionych znaków'
+    # Define CSV Columns
+    # Definicja kolumn CSV
+    csv_headers = [
+        'Filename', 'Translator ID', 'Last Segment Date', 
+        'Last Change Date', 'Created Segments', 
+        'Changed Segments', 'Created Chars', 
+        'Changed Chars'
     ]
 
+    # Write to CSV
+    # Zapis do CSV
     try:
-        with open(sciezka_wynikowa, mode='w', newline='', encoding='utf-8') as csvfile:
-            # Używamy separatora '|' zgodnie z instrukcją
-            writer = csv.DictWriter(csvfile, fieldnames=[
-                'nazwa_pliku', 'id_tlumacza', 'data_ost_seg', 'data_ost_zmiany',
-                'ilosc_stworzonych_seg', 'ilosc_zmienionych_seg',
-                'ilosc_stworzonych_znak', 'ilosc_zmienionych_znak'
-            ], delimiter='|')
-
-            # Pisanie nagłówków ręcznie, aby dopasować nazwy kolumn z instrukcji do kluczy
-            writer.writer.writerow(naglowki)
-
-            # Pisanie wierszy
-            for dane in wszystkie_dane:
-                writer.writerow(dane)
+        # 'utf-8-sig' pozwala Excelowi poprawnie otworzyć plik z polskimi znakami
+        with open(output_csv_path, mode='w', newline='', encoding='utf-8-sig') as csvfile:
+            # Używamy standardowego separatora ',' (przecinek)
+            writer = csv.DictWriter(csvfile, fieldnames=csv_headers, delimiter=',')
+            
+            writer.writeheader()
+            for row in all_rows:
+                writer.writerow(row)
         
-        print(f"\nSukces! Raport został zapisany w: {sciezka_wynikowa}")
+        print(f"\nSukces! Raport został zapisany w: {output_csv_path}")
 
     except IOError as e:
         print(f"Błąd zapisu pliku CSV: {e}")
