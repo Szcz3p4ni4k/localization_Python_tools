@@ -37,46 +37,44 @@ def get_clean_text_length(segment_element):
 def analyze_tmx_file_streaming(file_path):
     """
     Analizuje plik TMX w trybie strumieniowym (iterparse).
-    Zużywa minimalną ilość pamięci RAM nawet przy ogromnych plikach.
+    Zwraca krotkę: (słownik_statystyk, całkowita_ilość_segmentów)
     """
     translators_stats = {} 
     target_lang = None
+    total_segments_count = 0 # Licznik wszystkich segmentów w pliku
 
     try:
         # Używamy iterparse zamiast parse - czyta plik zdarzeniami
-        # events=('end',) oznacza, że reagujemy, gdy parser "zamyka" dany tag (przeczytał go całego)
         context = ET.iterparse(file_path, events=('end',))
         
-        # Iterujemy po elementach w miarę czytania pliku
         for event, elem in context:
             
-            # Pobieranie tagu bez namespace (czasami TMX ma {namespace}tu)
             tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
 
-            # 1. Szukanie języka docelowego w nagłówku (zazwyczaj jest na początku pliku)
+            # 1. Szukanie języka docelowego
             if tag_name == 'prop' and elem.get('type') == 'targetlang':
                 target_lang = elem.text
 
             # 2. Przetwarzanie jednostki tłumaczeniowej <tu>
             if tag_name == 'tu':
+                total_segments_count += 1 # Inkrementacja licznika całkowitego
+                
                 creation_date = elem.get('creationdate')
                 creation_id = elem.get('creationid')
                 change_date = elem.get('changedate')
                 change_id = elem.get('changeid')
 
-                # Znalezienie tekstu segmentu docelowego wewnątrz obecnego <tu>
+                # Znalezienie tekstu segmentu docelowego
                 target_text_len = 0
                 
-                for tuv in elem.findall('tuv'): # lub elem.findall('{...}tuv')
-                    # TUV też może mieć namespace, więc sprawdzamy ostrożnie
+                for tuv in elem.findall('tuv'): 
                     xml_lang = tuv.get('{http://www.w3.org/XML/1998/namespace}lang')
                     if not xml_lang:
                         xml_lang = tuv.get('lang')
 
                     if target_lang and xml_lang and target_lang.lower() in xml_lang.lower():
-                        seg = tuv.find('seg') # lub z namespace
+                        seg = tuv.find('seg')
                         if seg is None:
-                            # Próba znalezienia z dowolnym namespace
                             for child in tuv:
                                 if child.tag.endswith('seg'):
                                     seg = child
@@ -85,7 +83,7 @@ def analyze_tmx_file_streaming(file_path):
                         target_text_len = get_clean_text_length(seg)
                         break 
 
-                # --- LOGIKA ZLICZANIA (identyczna jak wcześniej) ---
+                # --- LOGIKA ZLICZANIA SZCZEGÓŁOWEGO ---
                 
                 def init_translator(user_id):
                     if user_id not in translators_stats:
@@ -125,20 +123,15 @@ def analyze_tmx_file_streaming(file_path):
                         if current_m_date == "-" or change_date > current_m_date:
                             translators_stats[change_id]['last_change_date'] = change_date
 
-                # === KLUCZOWY MOMENT DLA WYDAJNOŚCI ===
-                # Czyścimy element <tu> z pamięci RAM po jego przetworzeniu.
-                # Dzięki temu RAM nie rośnie w nieskończoność.
+                # Czyszczenie pamięci RAM
                 elem.clear()
-                
-                # Czyścimy też referencje do przodków (dla pewności przy ogromnych plikach)
-                # (W prostym iterparse 'root' może puchnąć, ale clear() na tu zazwyczaj wystarcza)
             
-        return translators_stats
+        # Zwracamy teraz DWIE rzeczy: statystyki i licznik ogólny
+        return translators_stats, total_segments_count
 
     except Exception as e:
         return f"ERROR: {str(e)}"
     finally:
-        # Wymuszenie sprzątania pamięci po pliku
         gc.collect()
 
 
@@ -148,7 +141,7 @@ input_path = os.path.dirname(os.path.abspath(__file__))
 
 print("========================================")
 print(f"Folder roboczy: {input_path}")
-print(f"Tryb: SUPER WYDAJNY (STREAMING)")
+print(f"Tryb: SUPER WYDAJNY + TOTAL SEGMENTS")
 print("========================================")
 
 # Krok 1: Szukanie plików
@@ -173,11 +166,18 @@ if tmx_files:
         with open(csv_path, mode='w', newline='', encoding='utf-8-sig') as f_out:
             writer = csv.writer(f_out, delimiter=';')
             
+            # Zaktualizowany nagłówek z nową kolumną
             headers = [
-                'Nazwa pliku', 'ID Tlumacza', 'Data ost. segmentu', 
-                'Data ost. zmiany', 'Ilosc stworzonych segmentow', 
-                'Ilosc zmienionych segmentow', 'Ilosc stworzonych znakow', 
-                'Ilosc zmienionych znakow', 'Status'
+                'Nazwa pliku', 
+                'Calkowita ilosc segmentow', # NOWA KOLUMNA
+                'ID Tlumacza', 
+                'Data ost. segmentu', 
+                'Data ost. zmiany', 
+                'Ilosc stworzonych segmentow', 
+                'Ilosc zmienionych segmentow', 
+                'Ilosc stworzonych znakow', 
+                'Ilosc zmienionych znakow', 
+                'Status'
             ]
             writer.writerow(headers)
             
@@ -187,30 +187,37 @@ if tmx_files:
                 count += 1
                 full_path = os.path.join(input_path, filename)
                 
-                # Używamy nowej funkcji streamingowej
+                # Wywołanie funkcji
                 result = analyze_tmx_file_streaming(full_path)
                 
                 status_msg = "OK"
 
+                # Obsługa błędów (result jest stringiem w przypadku błędu)
                 if isinstance(result, str) and result.startswith("ERROR"):
                     status_msg = result
-                    writer.writerow([filename, "-", "-", "-", "-", "-", "-", "-", status_msg])
+                    writer.writerow([filename, "-", "-", "-", "-", "-", "-", "-", "-", status_msg])
                 
-                elif result:
-                    for user_id, stats in result.items():
-                        writer.writerow([
-                            filename,
-                            stats['creation_id'],
-                            format_date(stats['last_creation_date']),
-                            format_date(stats['last_change_date']),
-                            stats['created_segs_count'],
-                            stats['changed_segs_count'],
-                            stats['created_chars_count'],
-                            stats['changed_chars_count'],
-                            status_msg
-                        ])
                 else:
-                    writer.writerow([filename, "BRAK DANYCH", "-", "-", "-", "-", "-", "-", "Pusty plik/Brak TU"])
+                    # Rozpakowanie krotki (słownik, licznik)
+                    stats_dict, total_count = result
+                    
+                    if stats_dict:
+                        for user_id, stats in stats_dict.items():
+                            writer.writerow([
+                                filename,
+                                total_count, # Wstawiamy całkowitą ilość segmentów
+                                stats['creation_id'],
+                                format_date(stats['last_creation_date']),
+                                format_date(stats['last_change_date']),
+                                stats['created_segs_count'],
+                                stats['changed_segs_count'],
+                                stats['created_chars_count'],
+                                stats['changed_chars_count'],
+                                status_msg
+                            ])
+                    else:
+                        # Przypadek pustego pliku lub braku ID, ale podajemy ilość segmentów (może być 0)
+                        writer.writerow([filename, total_count, "BRAK DANYCH", "-", "-", "-", "-", "-", "-", "BRAK ID"])
 
                 print(f"[{count}/{total_files}] Analiza: {filename}")
 
