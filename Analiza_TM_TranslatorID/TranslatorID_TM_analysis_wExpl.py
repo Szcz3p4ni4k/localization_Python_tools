@@ -248,4 +248,35 @@ if tmx_files:
                     
                     if stats_dict:
                         # Iterujemy po każdym tłumaczu znalezionym w pliku i zapisujemy wiersz
-                        for user_
+                        for user_id, stats in stats_dict.items():
+                            writer.writerow([
+                                filename,
+                                total_count, # Wspólna wartość dla wszystkich tłumaczy w tym pliku
+                                stats['creation_id'],
+                                format_date(stats['last_creation_date']),
+                                format_date(stats['last_change_date']),
+                                stats['created_segs_count'],
+                                stats['changed_segs_count'],
+                                stats['created_chars_count'],
+                                stats['changed_chars_count'],
+                                status_msg
+                            ])
+                    else:
+                        # Przypadek pustego pliku lub braku ID
+                        writer.writerow([filename, total_count, "BRAK DANYCH", "-", "-", "-", "-", "-", "-", "BRAK ID"])
+
+                # Wypisujemy postęp w konsoli
+                print(f"[{count}/{total_files}] Analiza: {filename}")
+
+            print("========================================")
+            print(f"SUKCES! Przetworzono {count} plików.")
+            
+    except Exception as e:
+        print(f"BŁĄD zapisu pliku CSV (zamknij Excela!): {e}")
+
+else:
+    print("Nie mam czego przetwarzać. Brak plików .tmx w folderze.")
+
+# Zatrzymanie okna konsoli po zakończeniu
+print("========================================")
+input("Naciśnij ENTER, aby zakończyć")
