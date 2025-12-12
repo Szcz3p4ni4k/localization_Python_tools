@@ -7,14 +7,13 @@ import re
 
 def format_date(date_str):
     """
-    Formats TMX date string (YYYYMMDDThhmmssZ) to YYYY.MM.DD.
-    Formatuje datę z formatu TMX na czytelny format 2015.08.25.
+    Formats TMX date string (YYYYMMDDThhmmssZ) to YYYY.MM.DD for CSV output.
+    Formatuje datę z formatu TMX na czytelny format 2015.08.25 do raportu.
     """
     if not date_str or len(date_str) < 8:
         return "-"
     
     # Wyciągamy rok, miesiąc i dzień za pomocą indeksów (slicing)
-    # TMX date format: 20150825T...
     year = date_str[0:4]
     month = date_str[4:6]
     day = date_str[6:8]
@@ -24,13 +23,13 @@ def format_date(date_str):
 def get_clean_text_length(segment_element):
     """
     Calculates the length of text within a segment, aggressively removing tags.
-    Oblicza długość tekstu, usuwając tagi oraz "ukryte" tagi wewnątrz <it>.
+    Oblicza długość tekstu, usuwając tagi XML oraz "ukryte" tagi wewnątrz <it>.
     """
     if segment_element is None:
         return 0
     
     # 1. Wyciągamy całą zawartość tekstową (również to co jest wewnątrz tagów bpt, it, etc.)
-    # ElementTree automatycznie zamienia &lt; na <, więc dostajemy np: "<rpr id="3">"
+    # ElementTree automatycznie zamienia &lt; na <
     raw_text = "".join(segment_element.itertext())
     
     if not raw_text:
@@ -39,10 +38,6 @@ def get_clean_text_length(segment_element):
     # 2. Używamy Regex, aby usunąć wszystko co wygląda jak tag HTML/XML (<...>)
     # Wzorzec: Znajdź znak <, potem cokolwiek co NIE jest >, potem znak >
     clean_text = re.sub(r'<[^>]+>', '', raw_text)
-    
-    # 3. Opcjonalnie: usuwamy nadmiarowe spacje, jeśli to potrzebne (tutaj liczymy długość oryginału bez tagów)
-    # Zgodnie z instrukcją "tekst razem ze spacjami", więc nie robimy .strip() na całości,
-    # chyba że tagi zostawiły dziury. Regex po prostu wycina tagi, zostawiając resztę nienaruszoną.
     
     return len(clean_text)
 
@@ -108,14 +103,20 @@ def analyze_tmx_file(file_path):
                 translators_stats[creation_id]['created_segs_count'] += 1
                 translators_stats[creation_id]['created_chars_count'] += target_text_len
                 
-                # Porównujemy daty w formacie oryginalnym (ISO), bo tak jest poprawnie matematycznie
+                # Do ustalenia "ostatniej daty" używamy pełnego czasu (precyzja)
                 current_c_date = translators_stats[creation_id]['last_creation_date']
                 if creation_date:
                     if current_c_date == "-" or creation_date > current_c_date:
                         translators_stats[creation_id]['last_creation_date'] = creation_date
 
             # --- LOGIKA: ZMIANA (CHANGE) ---
-            is_creation_only = (creation_date == change_date) and (creation_id == change_id)
+            
+            # Pobieramy tylko część daty (YYYYMMDD) do porównania, ignorując czas (godziny/sekundy)
+            c_date_day = creation_date[:8] if creation_date else None
+            m_date_day = change_date[:8] if change_date else None
+
+            # Warunek wykluczenia: to samo ID ORAZ ten sam DZIEŃ
+            is_creation_only = (c_date_day == m_date_day) and (creation_id == change_id)
 
             if change_id and not is_creation_only:
                 init_translator(change_id)
@@ -135,7 +136,6 @@ def analyze_tmx_file(file_path):
 
 # --- GŁÓWNA CZĘŚĆ SKRYPTU ---
 
-# Pobiera ścieżkę do folderu, w którym jest ten skrypt
 input_path = os.path.dirname(os.path.abspath(__file__))
 
 print("========================================")
@@ -161,7 +161,7 @@ if tmx_files:
     print(f"Tworzę plik csv: {csv_path}")
     
     try:
-        # Kodowanie utf-8-sig dla polskich znaków w Excelu
+        # Kodowanie utf-8-sig dla poprawnych polskich znaków w Excelu
         with open(csv_path, mode='w', newline='', encoding='utf-8-sig') as f_out:
             writer = csv.writer(f_out, delimiter=';')
             
@@ -189,12 +189,11 @@ if tmx_files:
                 
                 elif result:
                     for user_id, stats in result.items():
-                        # Tutaj używamy funkcji format_date przy zapisie do CSV
                         writer.writerow([
                             filename,
                             stats['creation_id'],
-                            format_date(stats['last_creation_date']), # Formatowanie daty 1
-                            format_date(stats['last_change_date']),   # Formatowanie daty 2
+                            format_date(stats['last_creation_date']),
+                            format_date(stats['last_change_date']),
                             stats['created_segs_count'],
                             stats['changed_segs_count'],
                             stats['created_chars_count'],
