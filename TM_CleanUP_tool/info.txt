@@ -1,0 +1,58 @@
+Skrypt czyszczący: 
+1. Wszystkie nazwy parametrów muszą być po angielsku
+2. komentarze po polsku 
+3. skrypt będzie wrzucany do folderu z pamięciami tłumaczeniowymi i plikiem CSV w którym będą zapisane nazwy TMów i odpowiadające im creationid (lista id w oparciu o którą będą usuwane bloki <tu>, plik z listą będzie się nazywał- translatorID_list.txt). Folder w którym się znajduję skrypt będzie inputem.
+4. skrypt będzie usuwał bloki <tu> w oparciu o creationid 
+	przykładowy blok <tu>:
+	
+	<tu changedate="20150825T100013Z" creationdate="20150825T100013Z" creationid="xxxxxxxxxxxx" changeid="xxxxxxxxxx">
+		<prop type="client">xxxxxx</prop>
+		<prop type="project">xxxxxx</prop>
+		<prop type="domain"> </prop>
+		<prop type="subject"> </prop>
+		<prop type="corrected">xx</prop>
+		<prop type="aligned">xxxxxxxxx</prop>
+		<prop type="x-document">xxxxxxxxxxxxxxxx</prop>
+		<tuv xml:lang="pl">
+		  <prop type="x-context-pre">&lt;seg&gt;&lt;bpt i='1' type='bold'&gt;{}&lt;/bpt&gt;&lt;bpt i='2' type='italic'&gt;{}&lt;/bpt&gt;xxxxxxxxxxxxxx&lt;ept i='1'&gt;{}&lt;/ept&gt;&lt;ept i='2'&gt;{}&lt;/ept&gt;&lt;/seg&gt;</prop>
+		  <prop type="x-context-post">&lt;seg&gt;&lt;bpt i='1' type='italic'&gt;{}&lt;/bpt&gt;xxxxxxxxxxxxxxxxxxx&lt;ept i='1'&gt;{}&lt;/ept&gt;&lt;/seg&gt;</prop>
+		  <seg><bpt i='1' type='bold'>{}</bpt><bpt i='2' type='italic'>{}</bpt>xxxxxxxxxxxxxxx<ept i='1'>{}</ept><ept i='2'>{}</ept></seg>
+		</tuv>
+		<tuv xml:lang="en">
+		  <seg><bpt i='1' type='bold'>{}</bpt><bpt i='2' type='italic'>{}</bpt>xxxxxxxxxxxxx<ept i='1'>{}</ept><ept i='2'>{}</ept></seg>
+		</tuv>
+	</tu>
+ 
+ 5. skrypt będzie działał na 1685 plikach (w sumie 50G materiału) więc potrzebujemy umiejętnego zarządzania pamięcią RAM, żeby działanie skryptu nie spowodowało crusha
+ 6. na koniec skrypt powinien dodać do nazwy pamięci (pliku .tmx) _Updated.tmx
+ 8. dodatkowe informację na temat TMów:
+	-przykładowy początek pliku .tmx:
+		
+		<?xml version="1.0" encoding="utf-16"?>
+		<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+		<tmx version="1.4">
+		<header creationtool="MemoQ" creationtoolversion="11.2.9" segtype="sentence" adminlang="en-us" creationid="xxxx" srclang="pl" o-tmf="MemoQTM" datatype="unknown">
+		  <prop type="defclient">xxx</prop>
+		  <prop type="defproject"> </prop>
+		  <prop type="defdomain"> </prop>
+		  <prop type="defsubject"> </prop>
+		  <prop type="description"> </prop>
+		  <prop type="targetlang">en</prop>
+		  <prop type="name">488 pl-en</prop>
+		</header>
+		<body>
+		  <tu changedate="20130806T133201Z" creationdate="20130806T133201Z" creationid="xxxx" changeid="xxxxx">
+			<prop type="client"> </prop>
+			<prop type="project"> </prop>
+			<prop type="domain"> </prop>
+			<prop type="subject"> </prop>
+			<prop type="corrected">no</prop>
+			<prop type="aligned">no</prop>
+			<tuv xml:lang="pl">
+			  <seg>EGIPT.</seg>
+			</tuv>
+			<tuv xml:lang="en">
+			  <seg>EGYPT.</seg>
+			</tuv>
+		  </tu>
+9. skrypt powinien generować plik log.txt w którym będzie raport działania np. status mówiący że wszystko poszło ok i status że coś nie poszło ok np nie znaleziono id tłumacza w danym TM
