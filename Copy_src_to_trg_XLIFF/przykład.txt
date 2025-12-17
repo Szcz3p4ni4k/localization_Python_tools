@@ -1,0 +1,6 @@
+Przykład: <unit canResegment="no" id="6gRj9UHGITJ.AltText" type="Articulate:PlainText"><segment canResegment="no"><source>xxxxxx</source></segment></unit>
+
+
+
+
+Docelowo: <unit canResegment="no" id="6gRj9UHGITJ.AltText" type="Articulate:PlainText"><segment canResegment="no"><source>xxxxx</source><target>xxxxx</target></segment></unit>
