@@ -6,13 +6,20 @@ import xml.etree.ElementTree as ET
 INPUT_EXT = '.xml'
 OUTPUT_FOLDER = 'output'
 
+def register_all_namespaces(filename):
+    """
+    Funkcja pomocnicza do skanowania pliku i rejestrowania prefixów.
+    Zapobiega pojawianiu się ns0: w pliku wynikowym.
+    """
+    namespaces = dict([node for _, node in ET.iterparse(filename, events=['start-ns'])])
+    for ns, url in namespaces.items():
+        ET.register_namespace(ns, url)
+
 def process_xlf_files():
-    # Sprawdzenie i utworzenie folderu output
     if not os.path.exists(OUTPUT_FOLDER):
         os.makedirs(OUTPUT_FOLDER)
         print(f"Utworzono folder: {OUTPUT_FOLDER}")
 
-    # Pobranie listy plików w bieżącym katalogu
     files = [f for f in os.listdir('.') if f.endswith(INPUT_EXT)]
 
     if not files:
@@ -23,22 +30,22 @@ def process_xlf_files():
 
     for filename in files:
         try:
-            # Parsowanie pliku XML
+            # 1. Najpierw rejestrujemy przestrzenie nazw z pliku, żeby nie było ns0:
+            register_all_namespaces(filename)
+
+            # 2. Parsowanie pliku
             tree = ET.parse(filename)
             root = tree.getroot()
             
-            # Flaga informująca, czy dokonano zmian w pliku
             modified = False
 
-            # Iterujemy po wszystkich elementach, szukając 'segment'
-            # Używamy iter() zamiast findall z namespace, aby skrypt był uniwersalny
+            # Iterujemy po elementach
             for elem in root.iter():
-                # Sprawdzamy czy tag kończy się na 'segment' (ignorując namespace)
+                # Sprawdzamy czy to segment
                 if elem.tag.endswith('segment'):
                     source_node = None
                     target_node = None
                     
-                    # Szukamy source i sprawdzamy czy target już istnieje
                     for child in elem:
                         if child.tag.endswith('source'):
                             source_node = child
@@ -47,50 +54,39 @@ def process_xlf_files():
                     
                     # Jeśli jest source, a nie ma target -> kopiujemy
                     if source_node is not None and target_node is None:
-                        # Tworzymy nowy element target
-                        # Używamy tej samej nazwy tagu co source, zamieniając końcówkę
-                        # To pozwala zachować namespace, jeśli istnieje (np. {ns}source -> {ns}target)
+                        # Tworzymy tag target używając tej samej pełnej nazwy co source
+                        # (dzięki temu dziedziczy namespace {url}source -> {url}target)
                         new_tag_name = source_node.tag.replace('source', 'target')
                         target_node = ET.Element(new_tag_name)
                         
-                        # Kopiowanie tekstu głównego (tego zaraz po otwarciu <source>)
                         target_node.text = source_node.text
                         
-                        # Kopiowanie głębokie (deep copy) wszystkich tagów wewnątrz (np. <g>, <ph>, <br/>)
                         for internal_tag in source_node:
                             target_node.append(copy.deepcopy(internal_tag))
                             
-                        # Znajdujemy indeks source, aby wstawić target zaraz po nim
+                        # Wstawiamy target po source
                         parent_list = list(elem)
                         source_index = parent_list.index(source_node)
-                        
-                        # Wstawiamy target po source
                         elem.insert(source_index + 1, target_node)
                         
-                        # Opcjonalnie: Dodanie entera/wciecia po source, aby target nie był w tej samej linii co zamknięcie source
-                        # (To zależy od formatowania pliku, poniższa linia to kosmetyka dla czytelności XML)
                         if source_node.tail:
                             target_node.tail = source_node.tail
 
                         modified = True
 
-            # Zapisywanie pliku w folderze output
+            # Zapisywanie
+            output_path = os.path.join(OUTPUT_FOLDER, filename)
             if modified:
-                output_path = os.path.join(OUTPUT_FOLDER, filename)
-                # encoding='utf-8' i xml_declaration=True są ważne dla plików XLF/XML
                 tree.write(output_path, encoding='UTF-8', xml_declaration=True)
                 print(f"[OK] Przetworzono: {filename}")
             else:
-                # Jeśli plik nie wymagał zmian (np. miał już targety), po prostu go kopiujemy lub pomijamy
-                # Tutaj zapisujemy go też do output dla porządku
-                output_path = os.path.join(OUTPUT_FOLDER, filename)
                 tree.write(output_path, encoding='UTF-8', xml_declaration=True)
-                print(f"[INFO] Bez zmian (skopiowano): {filename}")
+                print(f"[INFO] Bez zmian: {filename}")
 
         except ET.ParseError as e:
-            print(f"[BŁĄD] Nie można przetworzyć pliku {filename}: {e}")
+            print(f"[BŁĄD] Plik {filename} jest uszkodzony: {e}")
         except Exception as e:
-            print(f"[BŁĄD] Wystąpił niespodziewany błąd przy {filename}: {e}")
+            print(f"[BŁĄD] {filename}: {e}")
 
 if __name__ == "__main__":
     process_xlf_files()
