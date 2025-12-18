@@ -1,4 +1,3 @@
-
 import os
 import xml.etree.ElementTree as ET
 import gc  # Garbage Collector do zarządzania pamięcią RAM
