@@ -55,4 +55,16 @@ Skrypt czyszczący:
 			  <seg>EGYPT.</seg>
 			</tuv>
 		  </tu>
+
 9. skrypt powinien generować plik log.txt w którym będzie raport działania np. status mówiący że wszystko poszło ok i status że coś nie poszło ok np nie znaleziono id tłumacza w danym TM
+
+------------------------------------------
+
+część pliku przed skryptem:
+<?xml version="1.0" encoding="utf-16"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+
+część pliku po skrypcie plik po skrypcie:
+<?xml version='1.0' encoding='UTF-8'?>
+<tmx version="1.4">
