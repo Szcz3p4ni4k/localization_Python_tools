@@ -80,3 +80,12 @@ dodatkowe informację:
 - skrypt będzie działał jednak na raporcie w formacie CSV.
 	- struktura raportu CSV : "Nazwa TM";Calkowita ilosc segmentow;ID Tlumacza;Data ost. segmentu;Data ost. zmiany;Ilosc stworzonych segmentow;Ilosc zmienionych segmentow;Ilosc stworzonych znakow;Ilosc zmienionych znakow;Status
 	- skrypt powinien analizować raport i działać w ten sposób -> analizuje raport -> otwieram plik TM adekwatny do nazwy TMa z raportu -> usuwam blok tu z id tłumacza adekwatnym do liniki 
+
+
+- skrypt zmienia zapis alternatywny &quot; na " 
+	przykład:
+		przed:
+		<ph>&lt;mq:ch val=&quot;	&quot; /&gt;</ph>
+		po:
+		<ph>&lt;mq:ch val="	" /&gt;</ph>
+
