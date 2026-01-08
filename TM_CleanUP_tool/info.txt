@@ -55,16 +55,28 @@ Skrypt czyszczący:
 			  <seg>EGYPT.</seg>
 			</tuv>
 		  </tu>
-
 9. skrypt powinien generować plik log.txt w którym będzie raport działania np. status mówiący że wszystko poszło ok i status że coś nie poszło ok np nie znaleziono id tłumacza w danym TM
 
-------------------------------------------
-
-część pliku przed skryptem:
-<?xml version="1.0" encoding="utf-16"?>
-<!DOCTYPE tmx SYSTEM "tmx14.dtd">
-<tmx version="1.4">
-
-część pliku po skrypcie plik po skrypcie:
-<?xml version='1.0' encoding='UTF-8'?>
-<tmx version="1.4">
+dodatkowe informację:
+- skrypt zamienia " ' " na " " " w tagach wewnątrz segmentu. Powinien zachowywać pierwotną strukturę pamięci tłumaczeniowej.
+		Przykład: 
+			Przed: 
+			<tuv xml:lang="pl">
+			  <prop type="x-context-post">&lt;seg&gt;&lt;bpt i='1' type='bold'&gt;{}&lt;/bpt&gt;&lt;ph&gt;&amp;lt;mq:ch val=&amp;quot;	&amp;quot; /&amp;gt;&lt;/ph&gt;xxxxxx&lt;ept i='1'&gt;{}&lt;/ept&gt;&lt;/seg&gt;</prop>
+			  <seg><bpt i='1' type='bold'>{}</bpt>xxxxx<ept i='1'>{}</ept></seg>
+			</tuv>
+			<tuv xml:lang="en">
+			  <seg><bpt i='1' type='bold'>{}</bpt>xxxxxxxxx<ept i='1'>{}</ept></seg>
+			</tuv>
+		
+			Po:
+			<tuv xml:lang="pl">
+			  <prop type="x-context-post">&lt;seg&gt;&lt;bpt i='1' type='bold'&gt;{}&lt;/bpt&gt;xxxxxxx&lt;ph&gt;&amp;lt;mq:ch val=&amp;quot;	&amp;quot; /&amp;gt;&lt;/ph&gt;xxxxxx&lt;ept i='1'&gt;{}&lt;/ept&gt;&lt;/seg&gt;</prop>
+			  <seg><bpt i="1" type="bold">{}</bpt>xxxxx<ept i="1">{}</ept></seg>
+			</tuv>
+			<tuv xml:lang="en">
+			  <seg><bpt i="1" type="bold">{}</bpt>xxxxxxxxx<ept i="1">{}</ept></seg>
+			</tuv>
+- skrypt będzie działał jednak na raporcie w formacie CSV.
+	- struktura raportu CSV : "Nazwa TM";Calkowita ilosc segmentow;ID Tlumacza;Data ost. segmentu;Data ost. zmiany;Ilosc stworzonych segmentow;Ilosc zmienionych segmentow;Ilosc stworzonych znakow;Ilosc zmienionych znakow;Status
+	- skrypt powinien analizować raport i działać w ten sposób -> analizuje raport -> otwieram plik TM adekwatny do nazwy TMa z raportu -> usuwam blok tu z id tłumacza adekwatnym do liniki 
