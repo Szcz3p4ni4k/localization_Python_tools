@@ -2,7 +2,7 @@ import requests
 
 # Składamy pełny adres: Domena + Port + Ścieżka do zasobów
 # Zazwyczaj jest to /memoq/api/v1
-BASE_URL = "https://memoqapi.lidex.com.pl:8081/memoq/api/v1/translationmemories"
+BASE_URL = "ADRES/memoq/api/v1/translationmemories"
 
 print(f"📡 Testuję połączenie z: {BASE_URL} ...\n")
 
