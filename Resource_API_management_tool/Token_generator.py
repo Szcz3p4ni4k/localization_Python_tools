@@ -9,7 +9,7 @@ def main():
     print("--- GENERATOR TOKENA MEMOQ ---")
     
     # 1. Pobieranie danych od użytkownika (nie zapisujemy ich w kodzie!)
-    username = input("Podaj login (np. DOMENA\\user): ")
+    username = input("Podaj login: ")
     # getpass ukrywa wpisywane znaki dla bezpieczeństwa
     password = getpass.getpass("Podaj hasło: ")
     
