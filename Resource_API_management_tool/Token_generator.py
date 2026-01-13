@@ -3,7 +3,7 @@ import json
 import getpass # Biblioteka do bezpiecznego wpisywania hasła (nie widać znaków)
 
 # --- KONFIGURACJA ---
-API_BASE_URL = "https://memoqapi.lidex.com.pl:8081/memoq/api/v1"
+API_BASE_URL = "------"
 
 def main():
     print("--- GENERATOR TOKENA MEMOQ ---")
