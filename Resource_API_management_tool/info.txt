@@ -1,0 +1,1 @@
+https://docs.memoq.com/current/en/memoQ-server-deployment-tool/deptool-configure-server.html
