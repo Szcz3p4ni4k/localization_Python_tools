@@ -50,27 +50,39 @@ def get_original_tm_info(tm_name_clean):
     # Endpoint: /tms
     url = f"{API_BASE_URL}/{ENDPOINT_TMS}"
     try:
+        print(f"DEBUG: Pytam serwer o listę TM pod adresem: {url}")
         response = requests.get(url, headers=HEADERS_JSON, verify=False)
         
-        if response.status_code == 401:
-            log_status("CRITICAL ERROR: Token wygasł! Wygeneruj nowy.")
-            return None
         if response.status_code != 200:
-            log_status(f"ERROR: Nie udało się pobrać listy TM. Kod: {response.status_code}")
+            log_status(f"ERROR: Błąd pobierania listy TM. Kod: {response.status_code}")
             return None
 
         tms = response.json()
-        # W Client API odpowiedź może być listą bezpośrednio
-        original_name_search = tm_name_clean.replace("_Updated.tmx", "").replace(".tmx", "")
         
-        # Szukamy, uwzględniając że klucze mogą być z Wielkiej Litery (Name vs name)
+        # Obliczamy czego szukamy
+        search_name = tm_name_clean.replace("_Updated.tmx", "").replace(".tmx", "")
+        print(f"DEBUG: Szukam pamięci o nazwie: '{search_name}'")
+        print(f"DEBUG: Serwer zwrócił {len(tms)} pamięci.")
+
+        # Przeszukujemy listę i wypisujemy co widzimy (pierwsze 5 dla testu)
         target_tm = None
-        for tm in tms:
-            # Obsługa obu wielkości liter dla pewności
-            name = tm.get('Name') or tm.get('name')
-            if name and name.lower() == original_name_search.lower():
+        
+        for i, tm in enumerate(tms):
+            # Próba wyciągnięcia nazwy z różnych pól
+            current_name = tm.get('Name') or tm.get('name') or tm.get('friendlyName')
+            
+            # Wypiszmy kilka pierwszych nazw, żeby zobaczyć format
+            if i < 5: 
+                print(f"Widzę na serwerze: '{current_name}'")
+
+            if current_name and current_name.lower().strip() == search_name.lower().strip():
+                print(f"ZNALAZŁEM PASUJĄCĄ PAMIĘĆ: {current_name}")
                 target_tm = tm
                 break
+        
+        if not target_tm:
+            print(f"NIE ZNALAZŁEM pamięci '{search_name}' na liście pobranej z serwera.")
+            print("Sprawdź, czy nie ma literówki lub spacji na końcu nazwy w memoQ.")
         
         return target_tm
 
