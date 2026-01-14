@@ -8,10 +8,10 @@ import urllib3
 # --- KONFIGURACJA ---
 
 # 1. TUTAJ WKLEJ SWÓJ AKTUALNY TOKEN
-MY_ACCESS_TOKEN = "WKLEJ_TUTAJ_DŁUGI_CIĄG_ZNAKÓW"
+MY_ACCESS_TOKEN = "token"
 
 # Adres bazowy (potwierdzony)
-API_BASE_URL = "https://memoqapi.lidex.com.pl:8081/memoqserverhttpapi/v1"
+API_BASE_URL = "adres_servera"
 
 # Folder z plikami i logi
 INPUT_DIR = "output"
