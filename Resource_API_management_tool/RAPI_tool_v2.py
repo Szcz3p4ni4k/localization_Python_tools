@@ -1,249 +1,182 @@
-import os
 import requests
-import json
-import time
-import datetime
+import csv
 import urllib3
+import time
 
-# --- KONFIGURACJA ---
+# ==========================================
+# KONFIGURACJA
+# ==========================================
+SERVER_URL = "https://memoqapi.lidex.com.pl:8081/memoqserverhttpapi/v1"
+USERNAME = "TUTAJ_WPISZ_LOGIN"  
+PASSWORD = "TUTAJ_WPISZ_HASLO"
+RAPORT_FILE = "raport.csv"       # Format: NazwaTM;Liczba;UserID_Do_Usuniecia
 
-# 1. TUTAJ WKLEJ SWÓJ AKTUALNY TOKEN
-MY_ACCESS_TOKEN = "token"
-
-# Adres bazowy (potwierdzony)
-API_BASE_URL = "adres_servera"
-
-# Folder z plikami i logi
-INPUT_DIR = "output"
-LOG_FILE = "log_import.txt"
-
-# --- CONFIG ENDPOINTÓW (Dla łatwej zmiany) ---
-ENDPOINT_TMS = "tms"          # Zmienione z translationmemories
-ENDPOINT_FILES = "fileuploads" # Zmienione z files (często w parze z tms idzie fileuploads)
-ENDPOINT_TASKS = "tasks"
-
-# --- PRZYGOTOWANIE NAGŁÓWKÓW ---
+# Wyłączamy ostrzeżenia SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-AUTH_HEADER = f"MQS-API {MY_ACCESS_TOKEN}"
+# ==========================================
+# FUNKCJE API
+# ==========================================
 
-HEADERS_JSON = {
-    "Authorization": AUTH_HEADER,
-    "Content-Type": "application/json"
-}
-
-HEADERS_STREAM = {
-    "Authorization": AUTH_HEADER,
-    "Content-Type": "application/octet-stream" 
-}
-
-# --- FUNKCJE ---
-
-def log_status(message):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    msg = f"[{timestamp}] {message}"
-    print(msg)
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(msg + "\n")
-
-def get_original_tm_info(tm_name_clean):
-    # Endpoint: /tms
-    url = f"{API_BASE_URL}/{ENDPOINT_TMS}"
+def api_login():
+    """Logowanie i pobranie tokena (zgodnie z obrazkiem 2.1 Authentication)"""
+    url = f"{SERVER_URL}/auth/login"
+    payload = {
+        "username": USERNAME,
+        "password": PASSWORD,
+        "LoginMode": "0" # 0 dla kont memoQ, 1 dla AD
+    }
+    
+    print(f"--- Logowanie do {url} ---")
     try:
-        print(f"DEBUG: Pytam serwer o listę TM pod adresem: {url}")
-        response = requests.get(url, headers=HEADERS_JSON, verify=False)
-        
-        if response.status_code != 200:
-            log_status(f"ERROR: Błąd pobierania listy TM. Kod: {response.status_code}")
+        resp = requests.post(url, json=payload, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            token = data.get("AccessToken")
+            print("Zalogowano pomyślnie.")
+            return token
+        else:
+            print(f"Błąd logowania: {resp.status_code} {resp.text}")
             return None
-
-        tms = response.json()
-        
-        # Obliczamy czego szukamy
-        search_name = tm_name_clean.replace("_Updated.tmx", "").replace(".tmx", "")
-        print(f"DEBUG: Szukam pamięci o nazwie: '{search_name}'")
-        print(f"DEBUG: Serwer zwrócił {len(tms)} pamięci.")
-
-        # Przeszukujemy listę i wypisujemy co widzimy (pierwsze 5 dla testu)
-        target_tm = None
-        
-        for i, tm in enumerate(tms):
-            # Próba wyciągnięcia nazwy z różnych pól
-            current_name = tm.get('Name') or tm.get('name') or tm.get('friendlyName')
-            
-            # Wypiszmy kilka pierwszych nazw, żeby zobaczyć format
-            if i < 5: 
-                print(f"Widzę na serwerze: '{current_name}'")
-
-            if current_name and current_name.lower().strip() == search_name.lower().strip():
-                print(f"ZNALAZŁEM PASUJĄCĄ PAMIĘĆ: {current_name}")
-                target_tm = tm
-                break
-        
-        if not target_tm:
-            print(f"NIE ZNALAZŁEM pamięci '{search_name}' na liście pobranej z serwera.")
-            print("Sprawdź, czy nie ma literówki lub spacji na końcu nazwy w memoQ.")
-        
-        return target_tm
-
     except Exception as e:
-        log_status(f"ERROR: Błąd połączenia (Get Original): {str(e)}")
+        print(f"Błąd połączenia: {e}")
         return None
 
-def get_tm_details(tm_guid):
-    # Endpoint: /tms/{id}
-    url = f"{API_BASE_URL}/{ENDPOINT_TMS}/{tm_guid}"
-    resp = requests.get(url, headers=HEADERS_JSON, verify=False)
+def get_tms_map(token):
+    """Pobiera listę TM i zwraca mapę {FriendlyName: TMGuid}"""
+    url = f"{SERVER_URL}/tms"
+    headers = {"Authorization": f"MQS-API {token}"}
+    
+    try:
+        resp = requests.get(url, headers=headers, verify=False)
+        if resp.status_code == 200:
+            tms = resp.json()
+            # Tworzymy słownik: Klucz to Nazwa, Wartość to GUID
+            tm_map = {tm.get("FriendlyName"): tm.get("TMGuid") for tm in tms}
+            print(f"Pobrano listę {len(tm_map)} pamięci z serwera.")
+            return tm_map
+        else:
+            print(f"Błąd pobierania TM: {resp.status_code}")
+            return {}
+    except Exception as e:
+        print(f"Błąd: {e}")
+        return {}
+
+def get_tm_details(token, tm_guid):
+    """Pobiera szczegóły TM, żeby poznać liczbę wpisów (NumEntries)"""
+    url = f"{SERVER_URL}/tms/{tm_guid}"
+    headers = {"Authorization": f"MQS-API {token}"}
+    resp = requests.get(url, headers=headers, verify=False)
     if resp.status_code == 200:
         return resp.json()
     return None
 
-def create_new_tm(original_details, new_name):
-    # Endpoint: /tms
-    url = f"{API_BASE_URL}/{ENDPOINT_TMS}"
-    
-    # Próbujemy pobrać dane, obsługując różne wielkości liter (Safe Get)
-    def g(key_pascal, key_camel):
-        return original_details.get(key_pascal) or original_details.get(key_camel)
-
-    # Budujemy payload w PascalCase (wymagane dla /tms)
-    payload = {
-        "Name": new_name,
-        "SourceLanguageCode": g("SourceLanguageCode", "sourceLanguageCode"),
-        "TargetLanguageCode": g("TargetLanguageCode", "targetLanguageCode"),
-        "Client": g("Client", "client"),
-        "Domain": g("Domain", "domain"),
-        "Subject": g("Subject", "subject"),
-        "Project": g("Project", "project"),
-        "IsStoreFullContext": g("IsStoreFullContext", "isStoreFullContext") or True,
-        "IsReverseLang": g("IsReverseLang", "isReverseLang") or False
+def check_and_delete_entries(token, tm_guid, banned_user, num_entries):
+    """
+    Iteruje po wpisach, sprawdza Creatora i usuwa jeśli pasuje.
+    Korzysta z endpointów: 
+    - GET v1/tms/{tmGuid}/entries/{entryId}
+    - POST v1/tms/{tmGuid}/entries/{entryId}/delete
+    """
+    headers = {
+        "Authorization": f"MQS-API {token}",
+        "Content-Type": "application/json"
     }
-
-    resp = requests.post(url, headers=HEADERS_JSON, json=payload, verify=False)
     
-    if resp.status_code == 200 or resp.status_code == 201:
-        data = resp.json()
-        # Pobieramy ID (może być TmGuid lub Guid lub UniqueId)
-        new_guid = data.get("TmGuid") or data.get("tmGuid") or data.get("Guid") or data.get("uniqueId")
-        log_status(f"SUCCESS: Utworzono nową TM: {new_name}")
-        return new_guid
-    else:
-        log_status(f"ERROR: Nie udało się utworzyć TM {new_name}. Kod: {resp.status_code}. Info: {resp.text}")
-        return None
+    deleted_count = 0
+    print(f"   -> Rozpoczynam skanowanie ok. {num_entries} wpisów...")
 
-def upload_file(file_path):
-    # Próbujemy endpoint /fileuploads (częsty dla /tms) lub /files
-    url = f"{API_BASE_URL}/{ENDPOINT_FILES}"
+    # UWAGA: API memoQ zazwyczaj indeksuje wpisy od 1 lub 0. 
+    # Zakładamy pętlę po przybliżonej liczbie wpisów.
+    # WIDOCZNY PROBLEM: Jeśli ID nie są ciągłe (np. 1, 5, 100), pętla może trafić w próżnię.
+    # Jednak API nie daje funkcji "List All Entry IDs", więc musimy zgadywać ID.
     
-    try:
-        with open(file_path, 'rb') as f:
-            resp = requests.post(url, headers=HEADERS_STREAM, data=f, verify=False)
-            
-        if resp.status_code == 200:
-            # Zazwyczaj zwraca {"FileGuid": "..."}
-            data = resp.json()
-            return data.get("FileGuid") or data.get("fileGuid")
-        elif resp.status_code == 404:
-             log_status(f"ERROR: Endpoint '{ENDPOINT_FILES}' nie istnieje. Spróbuj zmienić w konfigu na 'files'.")
-             return None
-        else:
-            log_status(f"ERROR: Błąd uploadu pliku. Kod: {resp.status_code}. Info: {resp.text}")
-            return None
-    except Exception as e:
-        log_status(f"ERROR: Wyjątek przy uploadzie: {e}")
-        return None
-
-def wait_for_task(task_id):
-    url = f"{API_BASE_URL}/{ENDPOINT_TASKS}/{task_id}"
-    log_status(f"Czekam na zakończenie zadania {task_id}...")
+    # Dla bezpieczeństwa sprawdzamy zakres nieco większy niż liczba wpisów
+    search_limit = int(num_entries) + 2000 
     
-    while True:
-        resp = requests.get(url, headers=HEADERS_JSON, verify=False)
-        if resp.status_code != 200:
-            time.sleep(5)
-            continue
-            
-        task_info = resp.json()
-        # Status w PascalCase (Status) lub camelCase (status)
-        status = task_info.get("Status") or task_info.get("status")
+    for entry_id in range(1, search_limit):
+        # 1. Pobierz wpis
+        get_url = f"{SERVER_URL}/tms/{tm_guid}/entries/{entry_id}"
+        resp_get = requests.get(get_url, headers=headers, verify=False)
         
-        if status == "Completed":
-            return True, "Zakończono sukcesem"
-        elif status in ["Failed", "Cancelled"]:
-            # Pobierz error info
-            err = task_info.get("TaskResult") # Czasem tu są szczegóły
-            return False, f"Błąd zadania: {status} | {err}"
+        if resp_get.status_code == 404:
+            continue # Brak wpisu o takim ID, idziemy dalej
+            
+        if resp_get.status_code == 200:
+            entry_data = resp_get.json()
+            
+            # Sprawdzamy pole Creator (lub Modifier, zależnie co chcesz czyścić)
+            creator = entry_data.get("Creator", "")
+            modifier = entry_data.get("Modifier", "")
+            
+            # Czy użytkownik pasuje?
+            if banned_user.lower() in creator.lower() or banned_user.lower() in modifier.lower():
+                # 2. USUWANIE
+                del_url = f"{SERVER_URL}/tms/{tm_guid}/entries/{entry_id}/delete"
+                resp_del = requests.post(del_url, headers=headers, verify=False)
+                
+                if resp_del.status_code in [200, 204]:
+                    print(f"      [DEL] Usunięto ID {entry_id} (User: {creator})")
+                    deleted_count += 1
+                else:
+                    print(f"      [ERR] Błąd usuwania ID {entry_id}: {resp_del.status_code}")
         
-        time.sleep(2)
+        # Raport postępu co 100 wpisów
+        if entry_id % 100 == 0:
+            print(f"      ...przeskanowano {entry_id}/{search_limit}")
+
+    return deleted_count
+
+# ==========================================
+# GŁÓWNA PĘTLA
+# ==========================================
 
 def main():
-    if "WKLEJ" in MY_ACCESS_TOKEN:
-        print("BŁĄD: Nie wkleiłeś tokena!")
-        return
+    # 1. Login
+    token = api_login()
+    if not token: return
 
-    if not os.path.exists(INPUT_DIR):
-        print(f"Błąd: Nie znaleziono folderu {INPUT_DIR}")
-        return
-
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        f.write("--- START IMPORT PROCESS (TMS ENDPOINT MODE) ---\n")
-
-    files = [f for f in os.listdir(INPUT_DIR) if f.lower().endswith('.tmx')]
-    log_status(f"Znaleziono {len(files)} plików do importu.")
-
-    for i, file_name in enumerate(files, 1):
-        print(f"\n--- Przetwarzanie [{i}/{len(files)}]: {file_name} ---")
-        
-        # 1. Pobierz info o oryginale
-        original_info = get_original_tm_info(file_name)
-        if original_info is None:
-            continue
-        
-        # Pobieramy GUID - obsługa różnych nazw pól
-        orig_guid = original_info.get('TmGuid') or original_info.get('tmGuid') or original_info.get('Guid')
-        
-        # 2. Pobierz szczegóły
-        original_details = get_tm_details(orig_guid)
-        if not original_details: continue
-
-        # 3. Utwórz nową TM
-        new_tm_name = file_name.replace(".tmx", "")
-        new_tm_guid = create_new_tm(original_details, new_tm_name)
-        if not new_tm_guid: continue
-
-        # 4. Upload pliku
-        file_path = os.path.join(INPUT_DIR, file_name)
-        uploaded_file_id = upload_file(file_path)
-        if not uploaded_file_id: continue
-            
-        log_status(f"Zlecam import...")
-        
-        # Endpoint: /tms/{guid}/import
-        import_url = f"{API_BASE_URL}/{ENDPOINT_TMS}/{new_tm_guid}/import"
-        
-        # Payload PascalCase
-        import_payload = { "FileGuid": uploaded_file_id, "UpdateBehavior": "Add" }
-        
-        resp_import = requests.post(import_url, headers=HEADERS_JSON, json=import_payload, verify=False)
-        
-        if resp_import.status_code == 200:
-            data = resp_import.json()
-            task_id = data.get("TaskId") or data.get("taskId")
-            success, msg = wait_for_task(task_id)
-            if success:
-                log_status(f"SUCCESS: Import zakończony.")
-            else:
-                log_status(f"FAILURE: {msg}")
-        else:
-            log_status(f"ERROR IMPORTU: {resp_import.text}")
-
-        time.sleep(1)
-
+    # 2. Mapa TM z serwera
+    server_tms = get_tms_map(token) # { "Nazwa": "GUID" }
+    
+    # 3. Czytanie raportu i procesowanie
     try:
-        requests.post(f"{API_BASE_URL}/auth/logout", headers=HEADERS_JSON, verify=False)
-        print("Wylogowano sesję.")
-    except:
-        pass
+        with open(RAPORT_FILE, "r", encoding="utf-8") as f:
+            reader = csv.reader(f, delimiter=";")
+            
+            for row in reader:
+                # Format CSV: NazwaPliku;Liczba;UserDoUsuniecia
+                if len(row) < 3: continue
+                
+                tm_name = row[0].strip()
+                banned_user = row[2].strip()
+                
+                print(f"\n--- Przetwarzanie: {tm_name} (Szukam usera: {banned_user}) ---")
+                
+                # Szukamy GUID dla nazwy z pliku CSV
+                guid = server_tms.get(tm_name)
+                
+                if not guid:
+                    # Próba dopasowania bez rozszerzenia .tmx jeśli jest w CSV
+                    guid = server_tms.get(tm_name.replace(".tmx", ""))
+                
+                if guid:
+                    # Pobieramy info o TM, żeby wiedzieć ile skanować
+                    details = get_tm_details(token, guid)
+                    if details:
+                        num_entries = details.get("NumEntries", 1000)
+                        deleted = check_and_delete_entries(token, guid, banned_user, num_entries)
+                        print(f"ZAKOŃCZONO: Usunięto łącznie {deleted} segmentów z {tm_name}.")
+                    else:
+                        print("Nie udało się pobrać szczegółów TM.")
+                else:
+                    print(f"Nie znaleziono TM o nazwie '{tm_name}' na serwerze.")
+
+    except FileNotFoundError:
+        print(f"Brak pliku {RAPORT_FILE}")
+
+    # 4. Logout
+    requests.post(f"{SERVER_URL}/auth/logout", headers={"Authorization": f"MQS-API {token}"}, verify=False)
 
 if __name__ == "__main__":
     main()
