@@ -1,3 +1,6 @@
+Dokumentacja:
+https://docs.memoq.com/current/api-docs/resapi/APIHelp.html#api-reference
+
 # --- KONFIGURACJA ---
 SERVER_URL = "https://adres-twojego-serwera:8081/memoqserverhttpapi/v1"
 USERNAME = "TwójLoginMEMOQ"
@@ -44,3 +47,70 @@ Logika techniczna:
 Sortuje listę indeksów malejąco (od końca), aby usunięcie segmentu nie przesunęło numeracji pozostałych segmentów.
 
 Wysyła żądania POST .../entries/{id}/delete do serwera.
+
+-----------------------------
+
+1. logujemy się do serwera curl -X POST {adresSerwera}/memoqserverhttpapi/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"{userName}\",\"password\":\"{password}\"}"
+
+jako response dostajemy json:
+
+Przykład Response:
+
+{
+    "Name": "{userName}",
+    "Sid": "xxxxx",
+    "AccessToken": "{accessToken}"
+}
+
+Pobieramy z response AccessToken i tworzymy zmienną {accessToken}
+
+2. Pobieramy listę TMów za pomocą zapytania curl -X GET {adresSerwera}/memoqserverhttpapi/v1/tms?authToken={accessToken} 
+
+jako response dostajemy listę naszych TMów na serwerze
+
+Przykładowe response: 
+[
+    {
+        "AccessLevel": 1,
+        "Client": "client 1",
+        "Domain": "domain 1",
+        "Subject": "subject 1",
+        "Project": "project 1",
+        "NumEntries": 0,
+        "FriendlyName": "Test TM 1",
+        "SourceLangCode": "eng",
+        "TargetLangCode": "hun",
+        "TMGuid": "dea956bd-52ce-4fd5-a666-cb28ddefb090",
+        "TMOwner": "csiri"
+    },
+    {
+        "AccessLevel": 1,
+        "Client": "client 2",
+        "Domain": "domain 2",
+        "Subject": "subject 2",
+        "Project": "project 2",
+        "NumEntries": 0,
+        "FriendlyName": "Test TM 2",
+        "SourceLangCode": "ger",
+        "TargetLangCode": "spa",
+        "TMGuid": "2433ea4e-0ea6-4339-9c1f-f84bce41ad3b",
+        "TMOwner": "csiri"
+    }
+]
+
+
+
+4. w pliku raport.csv mamy listę w której będzie nazwa TMa w pierwszej kolumnie i w trzeciej kolumnie będzie id tłumacza segmenty którego musimy usunąć z danej pamięci tłumaczeniowej, więc w poprzednim response musimy znaleźć wartość "FriendlyName" (wartość "FriendlyName" będzie odpowiadać nazwie TMa z pliku CSV) i pobrać odpowiednią wartosć "TMGuid" tej pamięci.
+
+Pamięci będą fizycznie na ścieżce gdzie będzie odpalany skrypt. Musimy określić id bloku <tu> w którym znajduje się creationid="IDtłumacza". ID bloku <tu> nie jest zapisane w bloku, jest to numer wystąpienia bloku w pliku .tmx, pierwszy segment w pamięci będzie miał id 0, drugi będzie miał 1. id bloku <tu> to będzie będzie nasze {entryId}
+
+
+
+6. za pomocą curl -X POST {adresSerwera}/memoqserverhttpapi/v1/tms/{tmGuid}/entries/{entryId}/delete
+
+usuwamy segment. {entryId} - ID segmentu pobrane w poprzednim kroku
+
+7. Całość powtarzamy dla następnej Pamięci z raportu .CSV
+
+
+
