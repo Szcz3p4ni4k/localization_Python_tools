@@ -1,130 +1,156 @@
 import requests
 import csv
 import urllib3
-import time
+import os
+import xml.etree.ElementTree as ET
 
 # ==========================================
 # KONFIGURACJA
 # ==========================================
 SERVER_URL = "https://memoqapi.lidex.com.pl:8081/memoqserverhttpapi/v1"
-USERNAME = "TUTAJ_WPISZ_LOGIN"  
-PASSWORD = "TUTAJ_WPISZ_HASLO"
-RAPORT_FILE = "raport.csv"       # Format: NazwaTM;Liczba;UserID_Do_Usuniecia
+USERNAME = "TWOJ_LOGIN"
+PASSWORD = "TWOJE_HASLO"
+
+# Plik sterujący
+RAPORT_FILE = "raport.csv"
+# Folder gdzie leżą pliki .tmx (jeśli są w tym samym, zostaw kropkę)
+TMX_DIR = "." 
 
 # Wyłączamy ostrzeżenia SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
-# FUNKCJE API
+# FUNKCJE POMOCNICZE
 # ==========================================
 
+def log(msg):
+    print(f"[INFO] {msg}")
+
+def error(msg):
+    print(f"[ERROR] {msg}")
+
 def api_login():
-    """Logowanie i pobranie tokena (zgodnie z obrazkiem 2.1 Authentication)"""
+    """Logowanie POST /auth/login"""
     url = f"{SERVER_URL}/auth/login"
     payload = {
         "username": USERNAME,
         "password": PASSWORD,
-        "LoginMode": "0" # 0 dla kont memoQ, 1 dla AD
+        "LoginMode": "0"
     }
+    headers = {"Content-Type": "application/json"}
     
-    print(f"--- Logowanie do {url} ---")
+    log(f"Logowanie do: {url}")
     try:
-        resp = requests.post(url, json=payload, verify=False)
+        resp = requests.post(url, json=payload, headers=headers, verify=False)
         if resp.status_code == 200:
-            data = resp.json()
-            token = data.get("AccessToken")
-            print("Zalogowano pomyślnie.")
+            token = resp.json().get("AccessToken")
+            log("Zalogowano pomyślnie.")
             return token
         else:
-            print(f"Błąd logowania: {resp.status_code} {resp.text}")
+            error(f"Błąd logowania: {resp.status_code} | {resp.text}")
             return None
     except Exception as e:
-        print(f"Błąd połączenia: {e}")
+        error(f"Wyjątek połączenia: {e}")
         return None
 
-def get_tms_map(token):
-    """Pobiera listę TM i zwraca mapę {FriendlyName: TMGuid}"""
-    url = f"{SERVER_URL}/tms"
-    headers = {"Authorization": f"MQS-API {token}"}
+def get_server_tms_map(token):
+    """Pobiera listę TM i mapuje FriendlyName -> TMGuid"""
+    url = f"{SERVER_URL}/tms?authToken={token}"
+    log("Pobieranie listy pamięci z serwera...")
     
     try:
-        resp = requests.get(url, headers=headers, verify=False)
+        resp = requests.get(url, verify=False)
         if resp.status_code == 200:
-            tms = resp.json()
-            # Tworzymy słownik: Klucz to Nazwa, Wartość to GUID
-            tm_map = {tm.get("FriendlyName"): tm.get("TMGuid") for tm in tms}
-            print(f"Pobrano listę {len(tm_map)} pamięci z serwera.")
-            return tm_map
+            data = resp.json()
+            mapping = {}
+            for tm in data:
+                # Szukamy FriendlyName, jeśli brak to Name
+                name = tm.get("FriendlyName") or tm.get("Name")
+                guid = tm.get("TMGuid") or tm.get("TmGuid")
+                if name and guid:
+                    mapping[name] = guid
+            log(f"Pobrano {len(mapping)} pamięci.")
+            return mapping
         else:
-            print(f"Błąd pobierania TM: {resp.status_code}")
+            error(f"Błąd pobierania listy TM: {resp.status_code}")
             return {}
     except Exception as e:
-        print(f"Błąd: {e}")
+        error(f"Błąd pobierania listy: {e}")
         return {}
 
-def get_tm_details(token, tm_guid):
-    """Pobiera szczegóły TM, żeby poznać liczbę wpisów (NumEntries)"""
-    url = f"{SERVER_URL}/tms/{tm_guid}"
-    headers = {"Authorization": f"MQS-API {token}"}
-    resp = requests.get(url, headers=headers, verify=False)
-    if resp.status_code == 200:
-        return resp.json()
-    return None
+def get_ids_to_delete_from_tmx(file_path, banned_user):
+    """
+    Parsuje plik TMX w trybie strumieniowym (oszczędność RAM).
+    Zwraca listę indeksów (int), w których creationid == banned_user.
+    Indeksy liczone są od 0 (kolejność występowania <tu>).
+    """
+    ids_list = []
+    
+    # Licznik segmentów (nasze ID)
+    current_index = 0
+    
+    try:
+        # iterparse pozwala czytać plik kawałek po kawałku
+        context = ET.iterparse(file_path, events=("end",))
+        
+        for event, elem in context:
+            # Interesują nas tylko tagi <tu> (Translation Unit)
+            if elem.tag == "tu":
+                # Sprawdzamy atrybut creationid
+                # Uwaga: atrybuty w XML bywają case-sensitive, zazwyczaj jest to 'creationid'
+                c_id = elem.get("creationid")
+                
+                # Czasem memoQ używa 'changeid' jeśli to była edycja, 
+                # ale instrukcja mówi o creationid. Sprawdzamy match.
+                if c_id and c_id.lower() == banned_user.lower():
+                    ids_list.append(current_index)
+                
+                # WAŻNE: Czyścimy element z RAMu po przetworzeniu!
+                elem.clear()
+                current_index += 1
+                
+        return ids_list
+        
+    except Exception as e:
+        error(f"Błąd parsowania pliku {file_path}: {e}")
+        return []
 
-def check_and_delete_entries(token, tm_guid, banned_user, num_entries):
+def delete_entries_on_server(token, tm_guid, ids_list):
     """
-    Iteruje po wpisach, sprawdza Creatora i usuwa jeśli pasuje.
-    Korzysta z endpointów: 
-    - GET v1/tms/{tmGuid}/entries/{entryId}
-    - POST v1/tms/{tmGuid}/entries/{entryId}/delete
+    Wysyła żądania usunięcia dla listy ID.
+    Sortuje ID malejąco, aby uniknąć problemu przesuwania indeksów.
     """
-    headers = {
-        "Authorization": f"MQS-API {token}",
-        "Content-Type": "application/json"
-    }
+    # SORTOWANIE MALEJĄCE (Reverse) - Kluczowe dla bezpieczeństwa indeksów
+    ids_list.sort(reverse=True)
     
     deleted_count = 0
-    print(f"   -> Rozpoczynam skanowanie ok. {num_entries} wpisów...")
-
-    # UWAGA: API memoQ zazwyczaj indeksuje wpisy od 1 lub 0. 
-    # Zakładamy pętlę po przybliżonej liczbie wpisów.
-    # WIDOCZNY PROBLEM: Jeśli ID nie są ciągłe (np. 1, 5, 100), pętla może trafić w próżnię.
-    # Jednak API nie daje funkcji "List All Entry IDs", więc musimy zgadywać ID.
+    total = len(ids_list)
     
-    # Dla bezpieczeństwa sprawdzamy zakres nieco większy niż liczba wpisów
-    search_limit = int(num_entries) + 2000 
+    log(f"Rozpoczynam usuwanie {total} segmentów (kolejność malejąca)...")
     
-    for entry_id in range(1, search_limit):
-        # 1. Pobierz wpis
-        get_url = f"{SERVER_URL}/tms/{tm_guid}/entries/{entry_id}"
-        resp_get = requests.get(get_url, headers=headers, verify=False)
+    for i, entry_id in enumerate(ids_list, 1):
+        # URL do usuwania
+        url = f"{SERVER_URL}/tms/{tm_guid}/entries/{entry_id}/delete?authToken={token}"
         
-        if resp_get.status_code == 404:
-            continue # Brak wpisu o takim ID, idziemy dalej
+        try:
+            # POST bez body, token w URL
+            resp = requests.post(url, verify=False)
             
-        if resp_get.status_code == 200:
-            entry_data = resp_get.json()
-            
-            # Sprawdzamy pole Creator (lub Modifier, zależnie co chcesz czyścić)
-            creator = entry_data.get("Creator", "")
-            modifier = entry_data.get("Modifier", "")
-            
-            # Czy użytkownik pasuje?
-            if banned_user.lower() in creator.lower() or banned_user.lower() in modifier.lower():
-                # 2. USUWANIE
-                del_url = f"{SERVER_URL}/tms/{tm_guid}/entries/{entry_id}/delete"
-                resp_del = requests.post(del_url, headers=headers, verify=False)
+            if resp.status_code in [200, 204]:
+                # Sukces
+                deleted_count += 1
+            elif resp.status_code == 404:
+                error(f"Segment ID {entry_id} nie istnieje na serwerze (już usunięty?).")
+            else:
+                error(f"Błąd usuwania ID {entry_id}: {resp.status_code}")
                 
-                if resp_del.status_code in [200, 204]:
-                    print(f"      [DEL] Usunięto ID {entry_id} (User: {creator})")
-                    deleted_count += 1
-                else:
-                    print(f"      [ERR] Błąd usuwania ID {entry_id}: {resp_del.status_code}")
-        
-        # Raport postępu co 100 wpisów
-        if entry_id % 100 == 0:
-            print(f"      ...przeskanowano {entry_id}/{search_limit}")
-
+        except Exception as e:
+            error(f"Wyjątek przy ID {entry_id}: {e}")
+            
+        # Logowanie postępu co 100 sztuk
+        if i % 100 == 0:
+            print(f"   Postęp: {i}/{total} usunięto...")
+            
     return deleted_count
 
 # ==========================================
@@ -132,51 +158,75 @@ def check_and_delete_entries(token, tm_guid, banned_user, num_entries):
 # ==========================================
 
 def main():
-    # 1. Login
+    # 1. Logowanie
     token = api_login()
     if not token: return
-
-    # 2. Mapa TM z serwera
-    server_tms = get_tms_map(token) # { "Nazwa": "GUID" }
     
-    # 3. Czytanie raportu i procesowanie
-    try:
-        with open(RAPORT_FILE, "r", encoding="utf-8") as f:
-            reader = csv.reader(f, delimiter=";")
+    # 2. Mapa pamięci z serwera
+    server_map = get_server_tms_map(token)
+    if not server_map: return
+
+    # 3. Przetwarzanie raportu
+    if not os.path.exists(RAPORT_FILE):
+        error(f"Brak pliku raportu: {RAPORT_FILE}")
+        return
+
+    with open(RAPORT_FILE, "r", encoding="utf-8") as f:
+        # Zakładam separator średnik ; (typowy dla CSV w PL)
+        reader = csv.reader(f, delimiter=";")
+        
+        for row in reader:
+            # Format: NazwaPliku.tmx ; Liczba ; UserID
+            if len(row) < 3: continue
             
-            for row in reader:
-                # Format CSV: NazwaPliku;Liczba;UserDoUsuniecia
-                if len(row) < 3: continue
+            filename = row[0].strip()
+            banned_user = row[2].strip()
+            
+            # 3a. Znalezienie FriendlyName (usuwamy .tmx)
+            friendly_name_search = filename.replace(".tmx", "").strip()
+            
+            print(f"\n--- Przetwarzanie: {filename} (User: {banned_user}) ---")
+            
+            # 3b. Pobranie GUID z mapy serwera
+            # Szukamy dokładnego dopasowania lub ignorując wielkość liter
+            tm_guid = server_map.get(friendly_name_search)
+            
+            if not tm_guid:
+                # Próba case-insensitive
+                for s_name, s_guid in server_map.items():
+                    if s_name.lower() == friendly_name_search.lower():
+                        tm_guid = s_guid
+                        break
+            
+            if not tm_guid:
+                error(f"Nie znaleziono pamięci '{friendly_name_search}' na serwerze. Pomijam.")
+                continue
                 
-                tm_name = row[0].strip()
-                banned_user = row[2].strip()
+            log(f"Znaleziono GUID: {tm_guid}")
+            
+            # 3c. Analiza lokalnego pliku TMX (wyznaczanie ID do usunięcia)
+            local_path = os.path.join(TMX_DIR, filename)
+            if not os.path.exists(local_path):
+                error(f"Nie znaleziono pliku lokalnego: {local_path}. Nie mogę wyznaczyć ID.")
+                continue
                 
-                print(f"\n--- Przetwarzanie: {tm_name} (Szukam usera: {banned_user}) ---")
+            ids_to_delete = get_ids_to_delete_from_tmx(local_path, banned_user)
+            
+            if not ids_to_delete:
+                log("Brak segmentów tego użytkownika w pliku lokalnym.")
+                continue
                 
-                # Szukamy GUID dla nazwy z pliku CSV
-                guid = server_tms.get(tm_name)
-                
-                if not guid:
-                    # Próba dopasowania bez rozszerzenia .tmx jeśli jest w CSV
-                    guid = server_tms.get(tm_name.replace(".tmx", ""))
-                
-                if guid:
-                    # Pobieramy info o TM, żeby wiedzieć ile skanować
-                    details = get_tm_details(token, guid)
-                    if details:
-                        num_entries = details.get("NumEntries", 1000)
-                        deleted = check_and_delete_entries(token, guid, banned_user, num_entries)
-                        print(f"ZAKOŃCZONO: Usunięto łącznie {deleted} segmentów z {tm_name}.")
-                    else:
-                        print("Nie udało się pobrać szczegółów TM.")
-                else:
-                    print(f"Nie znaleziono TM o nazwie '{tm_name}' na serwerze.")
+            log(f"Znaleziono {len(ids_to_delete)} segmentów do usunięcia w pliku lokalnym.")
+            
+            # 3d. Wykonanie usuwania na serwerze
+            deleted = delete_entries_on_server(token, tm_guid, ids_to_delete)
+            log(f"Zakończono dla {filename}. Pomyślnie usunięto: {deleted}/{len(ids_to_delete)}")
 
-    except FileNotFoundError:
-        print(f"Brak pliku {RAPORT_FILE}")
-
-    # 4. Logout
-    requests.post(f"{SERVER_URL}/auth/logout", headers={"Authorization": f"MQS-API {token}"}, verify=False)
+    # 4. Wylogowanie
+    try:
+        requests.post(f"{SERVER_URL}/auth/logout", headers={"Content-Type": "application/json"}, verify=False)
+        log("Wylogowano.")
+    except: pass
 
 if __name__ == "__main__":
     main()
