@@ -3,7 +3,7 @@ skryypt Resource API.
 Dokumentacja:
 https://docs.memoq.com/current/api-docs/resapi/APIHelp.html#api-reference
 
-1. logujemy się do serwera, ręcznie to robię za pomocą tej komendy curl -X POST https://memoqapi.lidex.com.pl:8081/memoqserverhttpapi/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"{userName}\",\"password\":\"{password}\"}"
+1. logujemy się do serwera, ręcznie to robię za pomocą tej komendy curl -X POST {adresSerwera}/memoqserverhttpapi/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"{userName}\",\"password\":\"{password}\"}"
 
 jako response dostajemy json:
 
@@ -17,7 +17,7 @@ Przykład Response:
 
 Pobieramy z response AccessToken i tworzymy zmienną {accessToken}
 
-2. Pobieramy listę TMów za pomocą zapytania curl -X GET https://memoqapi.lidex.com.pl:8081/memoqserverhttpapi/v1/tms?authToken={accessToken} 
+2. Pobieramy listę TMów za pomocą zapytania curl -X GET {adresSerwera}/memoqserverhttpapi/v1/tms?authToken={accessToken} 
 
 jako response dostajemy listę naszych TMów na serwerze
 
@@ -59,10 +59,11 @@ w pliku raport.csv będziemy mieli listę w której będzie nazwa TMa w pierwsze
 
 
 
-6. za pomocą curl -X POST https://memoqapi.lidex.com.pl:8081/memoqserverhttpapi/v1/tms/{tmGuid}/entries/{entryId}/delete
+6. za pomocą curl -X POST {adresSerwera}/memoqserverhttpapi/v1/tms/{tmGuid}/entries/{entryId}/delete?authToken={accessToken} 
 
 usuwamy segment. {entryId} - ID segmentu pobrane w poprzednim kroku
 
 7. Całość powtarzamy dla następnej Pamięci z raportu .CSV 
+
 
 wszystkie komendy testowałem w terminalu i działały
