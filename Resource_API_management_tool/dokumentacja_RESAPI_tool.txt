@@ -1,0 +1,46 @@
+# --- KONFIGURACJA ---
+SERVER_URL = "https://adres-twojego-serwera:8081/memoqserverhttpapi/v1"
+USERNAME = "TwójLoginMEMOQ"
+PASSWORD = "TwojeHasło"
+
+# Nazwa pliku CSV
+RAPORT_FILE = "raport.csv"
+# Folder z plikami TMX ("." oznacza bieżący katalog)
+TMX_DIR = "."
+
+
+Struktura katalogu:
+/projekt
+  ├── tm_cleaner_final.py      # Główny skrypt
+  ├── raport.csv               # Plik sterujący (lista plików i użytkowników)
+  ├── Kliencki_TM.tmx          # Lokalne pliki TMX (dokładne kopie z serwera!)
+  ├── Inny_Projekt.tmx
+  └── ...
+  
+  Format pliku raport.csv
+Plik musi być oddzielony średnikami (;). Format: NazwaPliku.tmx;LiczbaSegmentow;UserID_Do_Usuniecia
+
+
+Logika techniczna: 
+
+1. Logowanie: Skrypt loguje się do endpointu /auth/login i pobiera AccessToken.
+
+2. Mapowanie: Pobiera listę wszystkich TM z serwera i tworzy mapę:
+
+3. FriendlyName (z nazwy pliku) -> TMGuid (ID techniczne na serwerze).
+
+4. Parsowanie lokalne:
+
+	-Otwiera lokalny plik .tmx.
+
+	-Czyta go w trybie strumieniowym (oszczędność RAM).
+
+	-Liczy wystąpienia znacznika <tu> (Translation Unit) od 0.
+
+	-Jeśli atrybut creationid w bloku zgadza się z użytkownikiem z CSV, dodaje obecny numer indeksu do listy do usunięcia.
+
+5. Bezpieczne usuwanie:
+
+Sortuje listę indeksów malejąco (od końca), aby usunięcie segmentu nie przesunęło numeracji pozostałych segmentów.
+
+Wysyła żądania POST .../entries/{id}/delete do serwera.
