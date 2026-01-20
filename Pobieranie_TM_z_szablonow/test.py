@@ -1,1 +1,0 @@
-print("działa", flush=True)
