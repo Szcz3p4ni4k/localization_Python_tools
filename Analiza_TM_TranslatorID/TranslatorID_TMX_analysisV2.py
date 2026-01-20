@@ -1,8 +1,8 @@
-import os  # Biblioteka do obsługi systemu operacyjnego (ścieżki, pliki, foldery)
-import csv # Biblioteka do obsługi plików CSV (Comma Separated Values)
-import xml.etree.ElementTree as ET # Biblioteka do parsowania (czytania) plików XML
-import re  # Biblioteka do wyrażeń regularnych (Regex) - potrzebna do czyszczenia tekstu z tagów
-import gc  # Garbage Collector - narzędzie do ręcznego zwalniania pamięci RAM
+import os
+import csv
+import xml.etree.ElementTree as ET
+import re
+import gc
 
 # --- FUNKCJE POMOCNICZE ---
 
@@ -14,64 +14,60 @@ def format_date(date_str):
     if not date_str or len(date_str) < 8:
         return "-"
     
-    # Data w TMX to np. "20250714T160952Z" (ciąg znaków).
-    # Używamy tzw. slicingu (wycinania kawałków), aby pobrać rok, miesiąc i dzień.
+    # Data w TMX to np. "20250714T160952Z"
+    # pobieramy rok, miesiąc i dzień
     year = date_str[0:4]   # Znaki od indeksu 0 do 3 (czyli 4 pierwsze)
     month = date_str[4:6]  # Znaki od 4 do 5
     day = date_str[6:8]    # Znaki od 6 do 7
     
-    # Używamy f-stringa, aby połączyć te kawałki kropkami
+    
     return f"{year}.{month}.{day}"
 
 def get_clean_text_length(segment_element):
-    """
-    Oblicza długość tekstu, agresywnie usuwając wszelkie tagi XML/HTML.
-    """
+#Oblicza długość tekstu, agresywnie usuwając wszelkie tagi XML/HTML
+    
     if segment_element is None:
         return 0
     
-    # 1. Metoda .itertext() wyciąga tekst ze wszystkich zagnieżdżonych elementów.
-    #    Dzięki temu, jeśli tekst jest pocięty przez tagi <bpt>, <ept>, dostaniemy całość.
+    # 1. Metoda .itertext() wyciąga tekst ze wszystkich zagnieżdżonych elementów
+    #    Dzięki temu, jeśli tekst jest pocięty przez tagi <bpt>, <ept>, dostaniemy całość
     raw_text = "".join(segment_element.itertext())
     
     if not raw_text:
         return 0
 
-    # 2. Używamy Regex (re.sub), aby usunąć pozostałości tagów.
-    #    Wzorzec r'<[^>]+>' oznacza: znajdź znak '<', potem cokolwiek co NIE jest '>', i na końcu '>'.
-    #    Zamieniamy to na pusty ciąg znaków (''), czyli usuwamy.
+    # 2. Używamy Regex (re.sub), aby usunąć pozostałości tagów
+    #    r'<[^>]+> - znajdź znak '<', potem cokolwiek co NIE jest '>', i na końcu '>'
+    #    Zamieniamy to na pusty ciąg znaków ('')
     clean_text = re.sub(r'<[^>]+>', '', raw_text)
     
     # Zwracamy długość wyczyszczonego tekstu (liczba znaków)
     return len(clean_text)
 
-def analyze_tmx_file_streaming(file_path):
-    """
-    Główna funkcja analizująca. Używa trybu strumieniowego (iterparse),
-    co pozwala przetwarzać gigantyczne pliki bez ładowania ich w całości do RAM.
-    Zwraca: (słownik ze statystykami, całkowitą liczbę segmentów).
-    """
+def analyze_tmx_file_streaming(file_path):   
+#Główna funkcja analizująca. Używa trybu strumieniowego (iterparse),
+ #co pozwala przetwarzać gigantyczne pliki bez ładowania ich w całości do RAM.
+#Zwraca: (słownik ze statystykami, całkowitą liczbę segmentów).
+    
     translators_stats = {} # Słownik, gdzie będziemy zbierać dane dla każdego ID tłumacza
     target_lang = None     # Zmienna na kod języka docelowego (np. "en-GB")
     total_segments_count = 0 # Licznik wszystkich segmentów <tu> w pliku
 
     try:
-        # --- KLUCZ DO WYDAJNOŚCI ---
-        # Zamiast ET.parse (które ładuje cały plik), używamy ET.iterparse.
-        # events=('end',) oznacza: "daj mi znać, gdy parser DOJDZIE DO KOŃCA danego tagu".
+        # events=('end',) oznacza: "daj mi znać, gdy parser dojdzie do końca danego tagu".
         context = ET.iterparse(file_path, events=('end',))
         
-        # Pętla, która "idzie" przez plik element po elemencie
+        # Pętla idąca przez plik element po elemencie
         for event, elem in context:
             
-            # Wyciągamy samą nazwę tagu, usuwając tzw. namespace (np. {xml...}tu -> tu)
+            # Wyciągamy samą nazwę tagu, usuwając namespace (np. {xml...}tu -> tu)
             tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
 
-            # 1. Szukamy informacji o języku w nagłówku (tag <prop type="targetlang">)
+            # Szukamy informacji o języku w nagłówku (tag <prop type="targetlang">)
             if tag_name == 'prop' and elem.get('type') == 'targetlang':
                 target_lang = elem.text
 
-            # 2. Jeśli trafiliśmy na tag <tu> (Translation Unit), zaczynamy analizę segmentu
+            # Jeśli trafiliśmy na tag <tu>, zaczynamy analizę segmentu
             if tag_name == 'tu':
                 total_segments_count += 1 # Dodajemy 1 do ogólnej liczby segmentów
                 
@@ -91,12 +87,11 @@ def analyze_tmx_file_streaming(file_path):
                     if not xml_lang:
                         xml_lang = tuv.get('lang') # Zabezpieczenie, gdyby nie było namespace
 
-                    # Sprawdzamy, czy język tego tuv pasuje do języka docelowego pliku
+                    # Sprawdzamy, czy język tuv pasuje do języka docelowego pliku
                     if target_lang and xml_lang and target_lang.lower() in xml_lang.lower():
-                        # Znaleźliśmy target! Szukamy teraz w nim treści (<seg>)
+                        # Szukamy treści w segmencie (<seg>)
                         seg = tuv.find('seg')
                         
-                        # Czasami seg jest głębiej lub ma namespace, to jest zabezpieczenie:
                         if seg is None:
                             for child in tuv:
                                 if child.tag.endswith('seg'):
@@ -122,7 +117,6 @@ def analyze_tmx_file_streaming(file_path):
                             'changed_chars_count': 0
                         }
 
-                # A. Logika TWORZENIA (Creation)
                 # Jeśli jest creation_id, zawsze to zliczamy.
                 if creation_id:
                     init_translator(creation_id)
@@ -135,9 +129,7 @@ def analyze_tmx_file_streaming(file_path):
                         if current_c_date == "-" or creation_date > current_c_date:
                             translators_stats[creation_id]['last_creation_date'] = creation_date
 
-                # B. Logika ZMIANY (Change)
-                # Tutaj musimy sprawdzić, czy zmiana nie jest "fałszywa" (czyli czy to nie jest ten sam moment co utworzenie)
-                
+                # Tutaj musimy sprawdzić, czy zmiana nie jest fałszywa (czyli czy to nie jest ten sam moment co utworzenie)
                 # Bierzemy tylko pierwsze 8 znaków (YYYYMMDD), ignorując godziny/minuty
                 c_date_day = creation_date[:8] if creation_date else None
                 m_date_day = change_date[:8] if change_date else None
@@ -145,7 +137,7 @@ def analyze_tmx_file_streaming(file_path):
                 # Warunek wykluczenia: To samo ID oraz ten sam DZIEŃ
                 is_creation_only = (c_date_day == m_date_day) and (creation_id == change_id)
 
-                # Zliczamy zmianę tylko, jeśli mamy change_id I NIE jest to wykluczony przypadek
+                # Zliczamy zmianę tylko, jeśli mamy change_id i nie jest to wykluczony przypadek
                 if change_id and not is_creation_only:
                     init_translator(change_id)
                     translators_stats[change_id]['changed_segs_count'] += 1
@@ -156,7 +148,7 @@ def analyze_tmx_file_streaming(file_path):
                         if current_m_date == "-" or change_date > current_m_date:
                             translators_stats[change_id]['last_change_date'] = change_date
 
-                # --- CZYSZCZENIE PAMIĘCI (Kluczowe dla dużych plików) ---
+                # --- CZYSZCZENIE PAMIĘCI ---
                 # Po przetworzeniu tagu <tu>, usuwamy go z pamięci RAM.
                 elem.clear()
             
@@ -178,10 +170,9 @@ input_path = os.path.dirname(os.path.abspath(__file__))
 
 print("========================================")
 print(f"Folder roboczy: {input_path}")
-print(f"Tryb: SUPER WYDAJNY + TOTAL SEGMENTS")
 print("========================================")
 
-# Krok 1: Szukanie plików
+#Szukanie plików
 try:
     # Pobieramy listę wszystkich plików w folderze
     all_files = os.listdir(input_path)
@@ -193,7 +184,7 @@ except Exception as e:
     print(f"Błąd krytyczny przy czytaniu folderu: {e}")
     tmx_files = []
 
-# Krok 2: Przetwarzanie (tylko jeśli znaleziono pliki)
+#Przetwarzanie
 if tmx_files:
     # Tworzymy folder na wyniki
     output_dir = os.path.join(input_path, "Raport")
@@ -204,7 +195,7 @@ if tmx_files:
     
     try:
         # Otwieramy plik CSV do zapisu.
-        # 'utf-8-sig' jest ważne dla Excela, żeby widział polskie znaki.
+        # 'utf-8-sig'
         # newline='' zapobiega pustym liniom w Windows.
         with open(csv_path, mode='w', newline='', encoding='utf-8-sig') as f_out:
             writer = csv.writer(f_out, delimiter=';')
@@ -236,14 +227,14 @@ if tmx_files:
                 
                 status_msg = "OK"
 
-                # Sprawdzamy, czy funkcja zwróciła błąd (string) czy dane (krotka)
+                # Sprawdzamy, czy funkcja zwróciła błąd (string) czy dane
                 if isinstance(result, str) and result.startswith("ERROR"):
                     status_msg = result
                     # Zapisujemy wiersz z informacją o błędzie
                     writer.writerow([filename, "-", "-", "-", "-", "-", "-", "-", "-", status_msg])
                 
                 else:
-                    # Rozpakowujemy wynik (krotkę) na dwie zmienne
+                    # Rozpakowujemy wynik na dwie zmienne
                     stats_dict, total_count = result
                     
                     if stats_dict:
