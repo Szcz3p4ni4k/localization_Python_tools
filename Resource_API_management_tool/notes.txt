@@ -1,4 +1,4 @@
-skryypt Resource API.
+skrypt Resource API
 
 Dokumentacja:
 https://docs.memoq.com/current/api-docs/resapi/APIHelp.html#api-reference
@@ -68,4 +68,5 @@ usuwamy segment. {entryId} - ID segmentu pobrane w poprzednim kroku
 
 
 wszystkie komendy testowałem w terminalu i działały
+
 
