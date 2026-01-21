@@ -3,7 +3,8 @@ skryypt Resource API.
 Dokumentacja:
 https://docs.memoq.com/current/api-docs/resapi/APIHelp.html#api-reference
 
-1. logujemy się do serwera, ręcznie to robię za pomocą tej komendy curl -X POST {adresSerwera}/memoqserverhttpapi/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"{userName}\",\"password\":\"{password}\"}"
+1. logujemy się do serwera:
+curl -X POST {adresSerwera}/memoqserverhttpapi/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"{userName}\",\"password\":\"{password}\"}"
 
 jako response dostajemy json:
 
@@ -67,3 +68,4 @@ usuwamy segment. {entryId} - ID segmentu pobrane w poprzednim kroku
 
 
 wszystkie komendy testowałem w terminalu i działały
+
