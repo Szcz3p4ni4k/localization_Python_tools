@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 # ==========================================
 # KONFIGURACJA
 # ==========================================
-SERVER_URL = "https://memoqapi.lidex.com.pl:8081/memoqserverhttpapi/v1"
+SERVER_URL = "ADRES_SERWERA"
 USERNAME = "TWOJ_LOGIN"
 PASSWORD = "TWOJE_HASLO"
 
