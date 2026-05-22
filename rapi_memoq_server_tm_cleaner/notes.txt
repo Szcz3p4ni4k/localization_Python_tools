@@ -67,6 +67,6 @@ usuwamy segment. {entryId} - ID segmentu pobrane w poprzednim kroku
 7. Całość powtarzamy dla następnej Pamięci z raportu .CSV 
 
 
-wszystkie komendy testowałem w terminalu i działały
+
 
 
